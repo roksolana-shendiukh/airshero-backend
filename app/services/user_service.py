@@ -100,10 +100,10 @@ def _validate_name(value: str, field: str) -> str:
             "loc": ["body", field],
             "msg": "Only Latin letters are allowed"
         }])
-    if len(value) < 3:
+    if len(value) < 2:
         raise HTTPException(status_code=422, detail=[{
             "loc": ["body", field],
-            "msg": "Must be at least 3 characters"
+            "msg": "Must be at least 2 characters"
         }])
     if len(value) > 30:
         raise HTTPException(status_code=422, detail=[{
@@ -242,8 +242,4 @@ def _validate_password(password: str) -> str:
             "msg": "Password must contain at least one special character"
         }])
     return password
-
-
-
-
 

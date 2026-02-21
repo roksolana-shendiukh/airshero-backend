@@ -61,16 +61,4 @@ def update_status(uid: str, body: SetStatusRequest, user=Depends(require_role("s
     set_status(uid, body.status)
     return {"message": f"Status {body.status} set successfully"}
 
-@router.post("/change-password")
-def change_password(body: ChangePasswordRequest, user=Depends(get_current_user)):
-    from app.services.user_service import _validate_password
-    _validate_password(body.password)
-    
-    try:
-        auth.update_user(user["uid"], password=body.password)
-        set_status(user["uid"], "active")
-        return {"message": "Password changed successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
