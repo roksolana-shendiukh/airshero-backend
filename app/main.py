@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.database import engine, Base
 from sqlalchemy import text
-from app.routes import admin, auth, forall, booking
+from app.routes import admin, auth,  forall, cities, flights
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -18,7 +18,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(forall.router)
-app.include_router(booking.router)
+app.include_router(cities.router)
+app.include_router(flights.router)
 
 @app.on_event("startup")
 def startup():
