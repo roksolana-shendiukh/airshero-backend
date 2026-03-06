@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.database import engine, Base
 from sqlalchemy import text
-from app.routes import admin, auth, forall, cities, flights, passengers, references, bookings, baggages
+from app.routes import admin, auth, forall, cities, flights, passengers, references, bookings, baggages, checkin_router
 from fastapi.middleware.cors import CORSMiddleware
 import app.models  
 
@@ -24,6 +24,7 @@ app.include_router(passengers.router)
 app.include_router(references.router)
 app.include_router(bookings.router)
 app.include_router(baggages.router)
+app.include_router(checkin_router.router)
 
 @app.on_event("startup")
 def startup():

@@ -112,12 +112,25 @@ def _validate_name(value: str, field: str) -> str:
         }])
     return value
 
-def create_user(email: str, first_name: str, last_name: str, airline_name: str, role_id: int):
+def create_user(
+    email: str,
+    first_name: str,
+    last_name: str,
+    airline_name: str,
+    role_id: int,
+    agent_id: int | None = None, 
+):
     role = ID_TO_ROLE.get(role_id)
     if not role or role == "systemAdmin":
         raise HTTPException(status_code=422, detail=[{
             "loc": ["body", "roleId"],
             "msg": "Invalid role"
+        }])
+
+    if role == "checkInAgent" and not agent_id:
+        raise HTTPException(status_code=422, detail=[{
+            "loc": ["body", "agentId"],
+            "msg": "agentId is required for checkInAgent role"
         }])
 
     first_name = _validate_name(first_name, "firstName")
@@ -148,15 +161,20 @@ def create_user(email: str, first_name: str, last_name: str, airline_name: str, 
             password=temp_password,
             display_name=f"{first_name} {last_name}"
         )
-        auth.set_custom_user_claims(user.uid, {
+
+        claims = {
             "firstName": first_name,
             "lastName": last_name,
             "airlineName": airline_name.strip(),
             "role": role,
             "status": "pendingPasswordChange",
             "tempPasswordCreatedAt": temp_password_created_at,
-        })
+        }
 
+        if role == "checkInAgent" and agent_id:
+            claims["agentId"] = agent_id
+
+        auth.set_custom_user_claims(user.uid, claims)
         _send_welcome_email(email, first_name, role, temp_password)
 
         return {"uid": user.uid, "email": user.email}
@@ -173,6 +191,8 @@ def create_user(email: str, first_name: str, last_name: str, airline_name: str, 
         }])
     except FirebaseError as e:
         raise HTTPException(status_code=503, detail=f"Firebase service unavailable: {str(e)}")
+
+
 
 def set_role(uid: str, role_id: int):
     role = ID_TO_ROLE.get(role_id)
