@@ -1,30 +1,37 @@
-from sqlalchemy.orm import Session
-from app.repositories.queries.baggage_queries import GET_BAGGAGE_OPTIONS_FOR_FLIGHT
+from sqlalchemy.orm import Session, joinedload
+from app.models.baggage_model import BaggagePricingInFlight, BaggagePricingRule, BaggageType
 
 
 def get_baggage_options(db: Session, flight_class_id: int) -> list:
-    rows = db.execute(GET_BAGGAGE_OPTIONS_FOR_FLIGHT, {
-        "flight_class_id": flight_class_id,
-    }).fetchall()
+    rows = (
+        db.query(BaggagePricingInFlight)
+        .options(
+            joinedload(BaggagePricingInFlight.baggage_pricing_rule)
+            .joinedload(BaggagePricingRule.baggage_type)
+        )
+        .filter(BaggagePricingInFlight.flight_class_id == flight_class_id)
+        .order_by(BaggagePricingInFlight.baggage_pricing_in_flight_id)
+        .all()
+    )
 
     return [
         {
-            "baggagePricingInFlightId": row.baggage_pricing_in_flight_id,
-            "baggagePricingRuleId":     row.baggage_pricing_rule_id,
-            "flightId":                 row.flight_id,
-            "flightClassId":            row.flight_class_id,
-            "price":                    float(row.baggage_price),
+            "baggagePricingInFlightId": r.baggage_pricing_in_flight_id,
+            "baggagePricingRuleId":     r.baggage_pricing_rule_id,
+            "flightId":                 r.flight_id,
+            "flightClassId":            r.flight_class_id,
+            "price":                    float(r.baggage_price),
             "rule": {
-                "id":                  row.baggage_pricing_rule_id,
-                "baggageTypeId":       row.baggage_type_id,
-                "dimension":           row.baggage_dimension,
-                "maxWeight":           float(row.baggage_max_weight),
-                "overweightFeePerKg":  float(row.overweight_fee_per_kg),
+                "id":                 r.baggage_pricing_rule.baggage_pricing_rule_id,
+                "baggageTypeId":      r.baggage_pricing_rule.baggage_type_id,
+                "dimension":          r.baggage_pricing_rule.baggage_dimension,
+                "maxWeight":          float(r.baggage_pricing_rule.baggage_max_weight),
+                "overweightFeePerKg": float(r.baggage_pricing_rule.overweight_fee_per_kg),
             },
             "type": {
-                "id":   row.baggage_type_id,
-                "name": row.baggage_type_name,
+                "id":   r.baggage_pricing_rule.baggage_type.baggage_type_id,
+                "name": r.baggage_pricing_rule.baggage_type.baggage_type_name,
             },
         }
-        for row in rows
+        for r in rows
     ]

@@ -119,6 +119,7 @@ def create_user(
     airline_name: str,
     role_id: int,
     agent_id: int | None = None, 
+    airline_id: int | None = None,
 ):
     role = ID_TO_ROLE.get(role_id)
     if not role or role == "systemAdmin":
@@ -173,6 +174,9 @@ def create_user(
 
         if role == "checkInAgent" and agent_id:
             claims["agentId"] = agent_id
+        
+        if airline_id:                         
+            claims["airlineId"] = airline_id 
 
         auth.set_custom_user_claims(user.uid, claims)
         _send_welcome_email(email, first_name, role, temp_password)

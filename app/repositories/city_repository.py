@@ -1,5 +1,10 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
+from app.models.airport_model import Airport
+from app.models.flight_model import Flight, FlightClass
+from app.models.flight_schedule_model import FlightSchedule
+from app.models.route_model import Route
+
 
 _SEARCH_CITIES = text("""
     SELECT DISTINCT TOP 10
@@ -19,47 +24,47 @@ _SEARCH_CITIES = text("""
     ORDER BY sort_order, ci.city_name
 """)
 
-_GET_ALTERNATIVES = """
-    SELECT DISTINCT 
-        dest_city.city_id, 
-        dest_city.city_name, 
-        co.country_name
-    FROM Flight f
-    JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
-    JOIN Route r ON fs.route_id = r.route_id
-    JOIN Airport arr_airport ON r.arrives_airport_id = arr_airport.airport_id
-    JOIN City dest_city ON arr_airport.city_id = dest_city.city_id
-    JOIN Country co ON dest_city.country_id = co.country_id
-    JOIN Airport dep_airport ON r.departs_airport_id = dep_airport.airport_id
-    WHERE dep_airport.city_id = :from_id
-"""
 
-_GET_AVAILABLE_DATES = """
-    SELECT DISTINCT CAST(f.departs_datetime AS DATE) as available_date
-    FROM Flight f
-    JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
-    JOIN Route r ON fs.route_id = r.route_id
-    JOIN Airport dep_airport ON r.departs_airport_id = dep_airport.airport_id
-    JOIN Airport arr_airport ON r.arrives_airport_id = arr_airport.airport_id
-    WHERE dep_airport.city_id = :from_id 
-      AND arr_airport.city_id = :to_id
-    -- Тимчасово прибираємо фільтр дати для тесту
-    -- AND f.departs_datetime >= GETDATE() 
-    ORDER BY available_date
-"""
-def get_alternatives(db: Session, from_city_id: int):
-    return db.execute(text(_GET_ALTERNATIVES), {"from_id": from_city_id}).fetchall()
-
-def search_cities(db: Session, query: str):
+def search_cities(db: Session, query: str) -> list:
     return db.execute(_SEARCH_CITIES, {
-        "q": f"%{query}%",
+        "q":       f"%{query}%",
         "q_start": f"{query}%",
     }).fetchall()
 
-def get_available_dates(db: Session, from_city_id: int, to_city_id: int):
-    rows = db.execute(text(_GET_AVAILABLE_DATES), {
-        "from_id": from_city_id,
-        "to_id": to_city_id
-    }).fetchall()
-    
-    return [str(row.available_date) for row in rows]
+
+def get_alternative_destinations(db: Session, from_city_id: int) -> list:
+    return (
+        db.query(
+            Airport.city_id.label("city_id"),
+        )
+        .join(Route, Route.arrives_airport_id == Airport.airport_id)
+        .join(FlightSchedule, FlightSchedule.route_id == Route.route_id)
+        .join(Flight, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
+        .join(Airport.__table__.alias("dep"), text("dep.airport_id = Route.departs_airport_id"))
+        .filter(text("dep.city_id = :from_id").bindparams(from_id=from_city_id))
+        .distinct()
+        .all()
+    )
+
+
+def get_available_flight_dates(db: Session, from_city_id: int, to_city_id: int) -> list:
+    return (
+        db.query(Flight.departs_datetime)
+        .join(FlightSchedule, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
+        .join(Route, FlightSchedule.route_id == Route.route_id)
+        .join(
+            Airport.__table__.alias("dep"),
+            text("dep.airport_id = Route.departs_airport_id"),
+        )
+        .join(
+            Airport.__table__.alias("arr"),
+            text("arr.airport_id = Route.arrives_airport_id"),
+        )
+        .filter(
+            text("dep.city_id = :from_id").bindparams(from_id=from_city_id),
+            text("arr.city_id = :to_id").bindparams(to_id=to_city_id),
+        )
+        .distinct()
+        .order_by(Flight.departs_datetime)
+        .all()
+    )

@@ -1,9 +1,25 @@
 from fastapi import FastAPI
-from app.database import engine, Base
-from sqlalchemy import text
-from app.routes import admin, auth, forall, cities, flights, passengers, references, bookings, baggages, checkin_router
 from fastapi.middleware.cors import CORSMiddleware
-import app.models  
+from sqlalchemy import text
+
+from app.database import engine
+from app.controllers import (
+    auth_controller,
+    admin_controller,
+    passenger_controller,
+    booking_controller,
+    baggage_controller,
+    city_controller,
+    flight_controller,
+    reference_controller,
+    checkin_controller,
+    airport_controller,
+    route_controller,
+    flight_operation_controller,
+    gate_controller,
+    airfleet_controller
+)
+import app.models
 
 app = FastAPI()
 
@@ -15,22 +31,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(admin.router)
-app.include_router(forall.router)
-app.include_router(cities.router)
-app.include_router(flights.router)
-app.include_router(passengers.router)
-app.include_router(references.router)
-app.include_router(bookings.router)
-app.include_router(baggages.router)
-app.include_router(checkin_router.router)
+app.include_router(auth_controller.router)
+app.include_router(admin_controller.router)
+app.include_router(passenger_controller.router)
+app.include_router(booking_controller.router)
+app.include_router(baggage_controller.router)
+app.include_router(city_controller.router)
+app.include_router(flight_controller.router)
+app.include_router(reference_controller.router)
+app.include_router(checkin_controller.router)
+app.include_router(airport_controller.router)
+app.include_router(route_controller.router)
+app.include_router(flight_operation_controller.router)
+app.include_router(gate_controller.router)
+app.include_router(airfleet_controller.router)
+
 
 @app.on_event("startup")
 def startup():
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-    print("DB connect")
+    print("DB connected")
+
 
 @app.get("/")
 def read_root():
