@@ -2,7 +2,9 @@ import firebase_admin
 from firebase_admin import credentials, auth
 
 cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
+firebase_admin.initialize_app(cred, {
+    "storageBucket": "airshero-b81e4.firebasestorage.app"
+})
 
 def verify_token(token: str) -> dict:
     try:

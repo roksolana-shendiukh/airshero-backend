@@ -21,5 +21,6 @@ class Airfleet(Base):
     seat_capacity             = Column(Integer)
     baggage_capacity          = Column(DECIMAL(7, 2))
     aircraft_fuel_consumption = Column(DECIMAL(6, 2))
+    aircraft_url              = Column(String(255))
 
     manufacturer = relationship("AirfleetManufacturer")

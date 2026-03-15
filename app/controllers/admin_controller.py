@@ -1,47 +1,18 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
-from enum import Enum
 from sqlalchemy.orm import Session
-from app.repositories import airline_repository
 
 from app.database import get_db
 from app.dependencies.auth import require_role
+from app.repositories import airline_repository
 from app.services import admin_service
+from app.schemas.admin_schema import (
+    CreateUserRequest,
+    SetRoleRequest,
+    SetStatusRequest,
+    SetOperationRequest,
+)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
-
-
-class UserStatus(str, Enum):
-    pendingActivation = "pendingActivation"
-    active = "active"
-    locked = "locked"
-
-
-class CreateUserRequest(BaseModel):
-    email: EmailStr
-    firstName: str
-    lastName: str
-    airlineName: str
-    roleId: int
-    agentId: Optional[int] = None
-    airlineId: Optional[int] = None  # ← додай
-
-    @field_validator("firstName", "lastName", "airlineName")
-    @classmethod
-    def not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Field cannot be empty")
-        if len(v) > 50:
-            raise ValueError("Field cannot exceed 50 characters")
-        return v.strip()
-
-class SetRoleRequest(BaseModel):
-    roleId: int
-
-
-class SetStatusRequest(BaseModel):
-    status: UserStatus
 
 
 @router.get("/users")
@@ -85,12 +56,23 @@ def update_status(
     return {"message": f"Status {body.status} set successfully"}
 
 
+@router.patch("/users/{uid}/operation")
+def set_operation(
+    uid: str,
+    body: SetOperationRequest,
+    user=Depends(require_role("systemAdmin")),
+):
+    admin_service.set_operation(uid, body.operationId)
+    return {"message": "Operation assigned successfully"}
+
+
 @router.get("/checkin-agents")
 def list_checkin_agents(
     db: Session = Depends(get_db),
     user=Depends(require_role("systemAdmin")),
 ):
     return admin_service.get_unassigned_checkin_agents(db)
+
 
 @router.get("/airlines")
 def list_airlines(
@@ -102,4 +84,3 @@ def list_airlines(
         {"airlineId": a.airline_id, "airlineName": a.airline_name}
         for a in airlines
     ]
-

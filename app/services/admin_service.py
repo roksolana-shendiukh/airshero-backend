@@ -67,3 +67,10 @@ def get_unassigned_checkin_agents(db: Session) -> list[dict]:
         for a in agents
         if a.checkin_agent_id not in used_agent_ids
     ]
+
+
+def set_operation(uid: str, operation_id: int | None) -> None:
+    from app.services.user_service import set_operation as _set_operation
+    _set_operation(uid, operation_id)
+
+    

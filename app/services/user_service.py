@@ -267,3 +267,13 @@ def _validate_password(password: str) -> str:
         }])
     return password
 
+def set_operation(uid: str, operation_id: int | None) -> None:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+    if operation_id is not None:
+        claims["operationId"] = operation_id
+    else:
+        claims.pop("operationId", None)
+    auth.set_custom_user_claims(uid, claims)
+
+    

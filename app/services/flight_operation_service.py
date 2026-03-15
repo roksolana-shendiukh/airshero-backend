@@ -1,11 +1,14 @@
 from sqlalchemy.orm import Session
-from app.models.flight_operation_model import FlightOperation
+from firebase_admin import auth as firebase_auth, firestore
+from app.models.flight_operation_model import FlightOperation, FlightOperationStatus
 from app.repositories import flight_operation_repository
 from app.schemas.flight_operation_schema import (
     FlightOperationCreateDTO,
     FlightOperationUpdateDTO,
     FlightOperationDTO,
 )
+
+_TERMINAL_STATUSES = {"Completed", "Cancelled"}
 
 
 def _map(op: FlightOperation) -> FlightOperationDTO:
@@ -15,27 +18,50 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
     dep      = getattr(route, 'departs_airport', None)
     arr      = getattr(route, 'arrives_airport', None)
 
+    def to_time_str(t):
+        if t is None:
+            return None
+        if hasattr(t, 'strftime'):
+            return t.strftime('%H:%M:%S')
+        return str(t)
+
     return FlightOperationDTO(
-        flightOperationId=op.flight_operation_id,
-        flightId=op.flight_id,
-        flightNumber=getattr(route, 'flight_number', None),
-        departsCode=getattr(dep, 'airport_code', None),
-        arrivesCode=getattr(arr, 'airport_code', None),
-        departsDatetime=getattr(flight, 'departs_datetime', None),
-        arrivesDdatetime=getattr(flight, 'arrives_datetime', None),
-        statusId=op.flight_operation_status_id,
-        statusName=getattr(op.status, 'flight_operation_status_name', None),
-        airfleetId=op.airfleet_id,
-        aircraftModel=getattr(op.airfleet, 'aircraft_model', None),
-        gateId=op.gate_id,
-        gateCode=getattr(op.gate, 'gate_code', None),
-        actualDepartureDatetime=op.actual_departure_date_time,
-        actualArrivalDatetime=op.actual_arrival_date_time,
-        boardingStartTime=op.boarding_start_time,
-        boardingEndTime=op.boarding_end_time,
-        baggageLoadingStartTime=op.baggage_loading_start_time,
-        baggageLoadingEndTime=op.baggage_loading_end_time,
+        flightOperationId        = op.flight_operation_id,
+        flightId                 = op.flight_id,
+        flightNumber             = getattr(route, 'flight_number', None),
+        departsCode              = getattr(dep, 'airport_code', None),
+        arrivesCode              = getattr(arr, 'airport_code', None),
+        departsDatetime          = getattr(flight, 'departs_datetime', None),
+        arrivesDdatetime         = getattr(flight, 'arrives_datetime', None),
+        statusId                 = op.flight_operation_status_id,
+        statusName               = getattr(op.status, 'flight_operation_status_name', None),
+        airfleetId               = op.airfleet_id,
+        aircraftModel            = getattr(op.airfleet, 'aircraft_model', None),
+        gateId                   = op.gate_id,
+        gateCode                 = getattr(op.gate, 'gate_code', None),
+        stateDescription         = getattr(op.state, 'flight_operation_state_description', None),
+        actualDepartureDatetime  = to_time_str(op.actual_departure_date_time),
+        actualArrivalDatetime    = to_time_str(op.actual_arrival_date_time),
+        boardingStartTime        = to_time_str(op.boarding_start_time),
+        boardingEndTime          = to_time_str(op.boarding_end_time),
+        baggageLoadingStartTime  = to_time_str(op.baggage_loading_start_time),
+        baggageLoadingEndTime    = to_time_str(op.baggage_loading_end_time),
     )
+
+
+def _save_to_firestore(uid: str, operation_id: int) -> None:
+    db_fs = firestore.client()
+    db_fs.collection("operators").document(uid)\
+        .collection("operations").document(str(operation_id))\
+        .set({"operationId": operation_id})
+
+
+def _clear_active_operation(uid: str, operation_id: int) -> None:
+    _save_to_firestore(uid, operation_id)
+    user   = firebase_auth.get_user(uid)
+    claims = user.custom_claims or {}
+    claims.pop("operationId", None)
+    firebase_auth.set_custom_user_claims(uid, claims)
 
 
 def get_all(db: Session) -> list[FlightOperationDTO]:
@@ -47,19 +73,35 @@ def get_by_id(db: Session, operation_id: int) -> FlightOperationDTO | None:
     return _map(op) if op else None
 
 
-def create(db: Session, data: FlightOperationCreateDTO) -> FlightOperationDTO:
+def create(db: Session, data: FlightOperationCreateDTO, uid: str) -> FlightOperationDTO:
+    firebase_user = firebase_auth.get_user(uid)
+    claims        = firebase_user.custom_claims or {}
+    if claims.get("operationId") is not None:
+        raise ValueError("You already have an active operation assigned")
+
     op = flight_operation_repository.create(db, data)
     db.commit()
+
+    claims["operationId"] = op.flight_operation_id
+    firebase_auth.set_custom_user_claims(uid, claims)
+
     return _map(flight_operation_repository.get_by_id(db, op.flight_operation_id))
 
 
-def update(db: Session, operation_id: int, data: FlightOperationUpdateDTO) -> FlightOperationDTO | None:
+def update(db: Session, operation_id: int, data: FlightOperationUpdateDTO, uid: str | None = None) -> FlightOperationDTO | None:
     op = flight_operation_repository.get_by_id(db, operation_id)
     if not op:
         return None
     flight_operation_repository.update(db, op, data)
     db.commit()
-    return _map(flight_operation_repository.get_by_id(db, operation_id))
+
+    updated     = flight_operation_repository.get_by_id(db, operation_id)
+    status_name = getattr(updated.status, 'flight_operation_status_name', None)
+
+    if uid and status_name in _TERMINAL_STATUSES:
+        _clear_active_operation(uid, operation_id)
+
+    return _map(updated)
 
 
 def delete(db: Session, operation_id: int) -> bool:
@@ -69,3 +111,63 @@ def delete(db: Session, operation_id: int) -> bool:
     flight_operation_repository.delete(db, op)
     db.commit()
     return True
+
+def cancel(
+    db: Session,
+    operation_id: int,
+    uid: str | None = None,
+    state_id: int | None = None,
+    custom_reason: str | None = None,
+) -> FlightOperationDTO | None:
+    cancelled_status = db.query(FlightOperationStatus)\
+        .filter(FlightOperationStatus.flight_operation_status_name == "Cancelled")\
+        .first()
+    if not cancelled_status:
+        return None
+
+    actual_state_id = state_id
+    if custom_reason and not state_id:
+        from app.models.flight_operation_model import FlightOperationState
+        new_state = FlightOperationState(
+            flight_operation_state_description=custom_reason
+        )
+        db.add(new_state)
+        db.flush()
+        actual_state_id = new_state.flight_operation_state_id
+
+    data = FlightOperationUpdateDTO(
+        flight_operation_status_id=cancelled_status.flight_operation_status_id,
+        flight_operation_state_id=actual_state_id,
+    )
+    return update(db, operation_id, data, uid=uid)
+
+
+def complete(
+    db: Session,
+    operation_id: int,
+    uid: str | None = None,
+    state_id: int | None = None,
+    custom_reason: str | None = None,
+) -> FlightOperationDTO | None:
+    completed_status = db.query(FlightOperationStatus)\
+        .filter(FlightOperationStatus.flight_operation_status_name == "Completed")\
+        .first()
+    if not completed_status:
+        return None
+
+    actual_state_id = state_id
+    if custom_reason and not state_id:
+        from app.models.flight_operation_model import FlightOperationState
+        new_state = FlightOperationState(
+            flight_operation_state_description=custom_reason
+        )
+        db.add(new_state)
+        db.flush()
+        actual_state_id = new_state.flight_operation_state_id
+
+    data = FlightOperationUpdateDTO(
+        flight_operation_status_id=completed_status.flight_operation_status_id,
+        flight_operation_state_id=actual_state_id,
+    )
+    return update(db, operation_id, data, uid=uid)
+

@@ -17,7 +17,8 @@ from app.controllers import (
     route_controller,
     flight_operation_controller,
     gate_controller,
-    airfleet_controller
+    airfleet_controller,
+    flight_crew_controller
 )
 import app.models
 
@@ -45,6 +46,7 @@ app.include_router(route_controller.router)
 app.include_router(flight_operation_controller.router)
 app.include_router(gate_controller.router)
 app.include_router(airfleet_controller.router)
+app.include_router(flight_crew_controller.router)
 
 
 @app.on_event("startup")

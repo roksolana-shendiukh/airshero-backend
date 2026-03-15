@@ -83,6 +83,7 @@ def get_flights_without_operation(
         {
             "flightId":        r["flight_id"],
             "flightNumber":    r["flight_number"],
+            "departsAirportId": r["departs_airport_id"],
             "departsCode":     r["departs_code"],
             "arrivesCode":     r["arrives_code"],
             "departsDatetime": r["departs_datetime"].isoformat(),
@@ -91,3 +92,18 @@ def get_flights_without_operation(
         }
         for r in rows
     ]
+
+
+@router.get("/without-operation")
+def get_flights_without_operation(
+    search: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned to this user")
+    rows = flight_repository.get_flights_without_operation(db, airline_id, search=search)
+    ...
+
+    

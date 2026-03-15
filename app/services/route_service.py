@@ -3,8 +3,8 @@ from app.models.route_model import Route
 from app.repositories import route_repository
 
 
-def get_all_routes(db: Session) -> list[dict]:
-    routes = route_repository.get_all(db)
+def get_all_routes(db: Session, airline_id: int | None = None) -> list[dict]:
+    routes = route_repository.get_all(db, airline_id=airline_id)
     result = []
     for r in routes:
         dep = r.departs_airport

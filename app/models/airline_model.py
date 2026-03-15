@@ -10,4 +10,3 @@ class Airline(Base):
     airline_name = Column(String)
     iata_code    = Column(String, unique=True)
     airline_url  = Column(String)
-    

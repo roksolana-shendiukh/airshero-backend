@@ -3,8 +3,12 @@ from .document_model import DocumentType, PassengerDocument
 from .passenger_model import Passenger
 
 from .airline_model import Airline
+from .country_model import Country
+from .city_model import City
+from .airline_airfleet_model import AirlineAirfleet
+from .flight_crew_model import FlightCrewPosition, FlightCrewLicenseType, FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation
 from .airport_model import Airport
-from .aircraft_model import AirfleetManufacturer, Airfleet
+from .airfleet_model import AirfleetManufacturer, Airfleet
 from .route_model import Route
 from .flight_schedule_model import FlightSchedule
 

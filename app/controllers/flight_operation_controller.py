@@ -1,13 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timezone, time as time_type
 
 from app.database import get_db
 from app.dependencies.auth import require_role
-from app.schemas.flight_operation_schema import FlightOperationCreateDTO, FlightOperationUpdateDTO
-from app.services import flight_operation_service
+from app.schemas.flight_operation_schema import FlightOperationCreateDTO, FlightOperationUpdateDTO, OperationStateRequestDTO
+from app.services import flight_operation_service, gate_service, flight_crew_service
+from app.models.flight_operation_model import FlightOperationStatus
+from app.models.flight_operation_model import FlightOperation
+from app.models.flight_model import Flight
 
 router = APIRouter(prefix="/flight-operations", tags=["Flight Operations"])
+
+_TIMELINE_FIELDS = {
+    "boarding-start":  "boarding_start_time",
+    "boarding-end":    "boarding_end_time",
+    "baggage-start":   "baggage_loading_start_time",
+    "baggage-end":     "baggage_loading_end_time",
+    "departure":       "actual_departure_date_time",
+    "arrival":         "actual_arrival_date_time",
+}
+
+_MIN_BOARDING_MINUTES = 20
+_MIN_BAGGAGE_MINUTES  = 15
+_ARRIVAL_WARN_MINUTES = 60
 
 
 @router.get("")
@@ -16,6 +33,21 @@ def get_all(
     user=Depends(require_role("flightOperator")),
 ):
     return flight_operation_service.get_all(db)
+
+
+@router.get("/statuses")
+def get_statuses(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    statuses = db.query(FlightOperationStatus).all()
+    return [
+        {
+            "flightOperationStatusId":   s.flight_operation_status_id,
+            "flightOperationStatusName": s.flight_operation_status_name,
+        }
+        for s in statuses
+    ]
 
 
 @router.get("/{operation_id}")
@@ -37,7 +69,7 @@ def create(
     user=Depends(require_role("flightOperator")),
 ):
     try:
-        return flight_operation_service.create(db, data)
+        return flight_operation_service.create(db, data, uid=user["uid"])
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except IntegrityError as e:
@@ -52,10 +84,139 @@ def update(
     db: Session = Depends(get_db),
     user=Depends(require_role("flightOperator")),
 ):
-    op = flight_operation_service.update(db, operation_id, data)
+    op = flight_operation_service.update(db, operation_id, data, uid=user["uid"])
     if not op:
         raise HTTPException(status_code=404, detail="Flight operation not found")
     return op
+
+
+@router.post("/{operation_id}/timeline/{step}", status_code=200)
+def set_timeline_step(
+    operation_id: int,
+    step: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    if step not in _TIMELINE_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unknown step '{step}'")
+
+    now = datetime.now(timezone.utc)
+    op  = db.query(FlightOperation).filter(
+        FlightOperation.flight_operation_id == operation_id
+    ).first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Flight operation not found")
+
+    if step == "boarding-start":
+        validation = flight_crew_service.validate_crew(db, operation_id)
+        if not validation.get("valid"):
+            missing     = validation.get("missing", {})
+            missing_str = ", ".join(f"{v}x {k}" for k, v in missing.items())
+            raise HTTPException(
+                status_code=422,
+                detail=f"Crew is not complete. Missing: {missing_str}"
+            )
+
+    if step == "boarding-end" and op.boarding_start_time:
+        start = op.boarding_start_time
+        if isinstance(start, time_type):
+            start = datetime.combine(now.date(), start, tzinfo=timezone.utc)
+        elif hasattr(start, 'tzinfo') and start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        diff = (now - start).total_seconds() / 60
+        if diff < _MIN_BOARDING_MINUTES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Boarding duration is only {int(diff)} min. Minimum is {_MIN_BOARDING_MINUTES} min. Are you sure?"
+            )
+
+    if step == "baggage-end" and op.baggage_loading_start_time:
+        start = op.baggage_loading_start_time
+        if isinstance(start, time_type):
+            start = datetime.combine(now.date(), start, tzinfo=timezone.utc)
+        elif hasattr(start, 'tzinfo') and start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        diff = (now - start).total_seconds() / 60
+        if diff < _MIN_BAGGAGE_MINUTES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Baggage loading duration is only {int(diff)} min. Minimum is {_MIN_BAGGAGE_MINUTES} min. Are you sure?"
+            )
+
+    if step == "arrival" and op.actual_departure_date_time:
+        flight = db.query(Flight).filter(
+            Flight.flight_id == op.flight_id
+        ).first()
+        if flight:
+            scheduled_duration = (
+                flight.arrives_datetime - flight.departs_datetime
+            ).total_seconds() / 60
+
+            dep = op.actual_departure_date_time
+            if hasattr(dep, 'tzinfo') and dep.tzinfo is None:
+                dep = dep.replace(tzinfo=timezone.utc)
+            actual_duration = (now - dep).total_seconds() / 60
+
+            min_duration = scheduled_duration * 0.8
+
+            if actual_duration < min_duration:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Flight duration is only {int(actual_duration)} min, "
+                        f"but scheduled is {int(scheduled_duration)} min "
+                        f"(minimum 80% = {int(min_duration)} min). "
+                        f"Are you sure the flight has arrived?"
+                    )
+                )
+            scheduled_arrival = flight.arrives_datetime
+            if hasattr(scheduled_arrival, 'tzinfo') and scheduled_arrival.tzinfo is None:
+                scheduled_arrival = scheduled_arrival.replace(tzinfo=timezone.utc)
+            delay = (now - scheduled_arrival).total_seconds() / 60
+            if abs(delay) > _ARRIVAL_WARN_MINUTES:
+                direction = "late" if delay > 0 else "early"
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Arrival is {int(abs(delay))} min {direction} "
+                        f"compared to schedule. Are you sure?"
+                    )
+                )
+
+    field = _TIMELINE_FIELDS[step]
+    data  = FlightOperationUpdateDTO(**{field: now})
+    result = flight_operation_service.update(db, operation_id, data, uid=user["uid"])
+    if not result:
+        raise HTTPException(status_code=404, detail="Flight operation not found")
+    return result
+
+
+@router.post("/{operation_id}/timeline/{step}/force", status_code=200)
+def set_timeline_step_force(
+    operation_id: int,
+    step: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    if step not in _TIMELINE_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unknown step '{step}'")
+
+    now   = datetime.now(timezone.utc)
+    field = _TIMELINE_FIELDS[step]
+    data  = FlightOperationUpdateDTO(**{field: now})
+    op    = flight_operation_service.update(db, operation_id, data, uid=user["uid"])
+    if not op:
+        raise HTTPException(status_code=404, detail="Flight operation not found")
+    return op
+
+
+@router.get("/{operation_id}/gates")
+def get_available_gates(
+    operation_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    return gate_service.get_available_gates(db, operation_id)
 
 
 @router.delete("/{operation_id}", status_code=204)
@@ -66,3 +227,53 @@ def delete(
 ):
     if not flight_operation_service.delete(db, operation_id):
         raise HTTPException(status_code=404, detail="Flight operation not found")
+
+@router.get("/states")
+def get_states(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    from app.models.flight_operation_model import FlightOperationState
+    states = db.query(FlightOperationState).all()
+    return [
+        {
+            "stateId": s.flight_operation_state_id,
+            "description": s.flight_operation_state_description,
+        }
+        for s in states
+    ]
+
+@router.post("/{operation_id}/cancel", status_code=200)
+def cancel_operation(
+    operation_id: int,
+    body: OperationStateRequestDTO = OperationStateRequestDTO(),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    op = flight_operation_service.cancel(
+        db, operation_id,
+        uid=user["uid"],
+        state_id=body.state_id,
+        custom_reason=body.custom_reason,
+    )
+    if not op:
+        raise HTTPException(status_code=404, detail="Flight operation not found")
+    return op
+ 
+ 
+@router.post("/{operation_id}/complete", status_code=200)
+def complete_operation(
+    operation_id: int,
+    body: OperationStateRequestDTO = OperationStateRequestDTO(),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    op = flight_operation_service.complete(
+        db, operation_id,
+        uid=user["uid"],
+        state_id=body.state_id,
+        custom_reason=body.custom_reason,
+    )
+    if not op:
+        raise HTTPException(status_code=404, detail="Flight operation not found")
+    return op
