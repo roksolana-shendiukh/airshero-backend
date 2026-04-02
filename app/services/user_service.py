@@ -1,14 +1,18 @@
 from firebase_admin import auth
 from firebase_admin.exceptions import FirebaseError
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 import re
 import secrets
 import string
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
+from datetime import datetime
 from app.config import settings
+from app.models.airline_model import Airline
+from app.controllers.airline_controller import get_airline_logo_url
+from app.database import SessionLocal
 
 
 ID_TO_ROLE = {
@@ -154,7 +158,17 @@ def create_user(
         pass
 
     temp_password = _generate_temp_password()
-    temp_password_created_at = datetime.now(timezone.utc).isoformat()
+    temp_password_created_at = datetime.now().isoformat()
+
+    logo_url = None
+    if airline_id:
+        db = SessionLocal() 
+        try:
+            airline = db.query(Airline).filter(Airline.airline_id == airline_id).first()
+            if airline:
+                logo_url = get_airline_logo_url(airline.airline_url)
+        finally:
+            db.close()
 
     try:
         user = auth.create_user(
@@ -167,6 +181,7 @@ def create_user(
             "firstName": first_name,
             "lastName": last_name,
             "airlineName": airline_name.strip(),
+            "airlineLogoUrl": logo_url,
             "role": role,
             "status": "pendingPasswordChange",
             "tempPasswordCreatedAt": temp_password_created_at,
@@ -179,6 +194,8 @@ def create_user(
             claims["airlineId"] = airline_id 
 
         auth.set_custom_user_claims(user.uid, claims)
+        print(f"DEBUG: Created user with logo: {logo_url}")
+
         _send_welcome_email(email, first_name, role, temp_password)
 
         return {"uid": user.uid, "email": user.email}
@@ -195,8 +212,6 @@ def create_user(
         }])
     except FirebaseError as e:
         raise HTTPException(status_code=503, detail=f"Firebase service unavailable: {str(e)}")
-
-
 
 def set_role(uid: str, role_id: int):
     role = ID_TO_ROLE.get(role_id)
@@ -226,7 +241,7 @@ def check_temp_password_expired(uid: str):
     if not created_at_str:
         return True
     created_at = datetime.fromisoformat(created_at_str)
-    elapsed = (datetime.now(timezone.utc) - created_at).total_seconds()
+    elapsed = (datetime.now() - created_at).total_seconds()
     if elapsed > 40 * 60:
         auth.update_user(uid, disabled=True)
         claims["status"] = "tempPasswordExpired"
@@ -276,4 +291,22 @@ def set_operation(uid: str, operation_id: int | None) -> None:
         claims.pop("operationId", None)
     auth.set_custom_user_claims(uid, claims)
 
+def update_user_claims_with_airline(uid: str, airline_id: int, db: Session):
+    airline = db.query(Airline).filter(Airline.airline_id == airline_id).first()
     
+    if not airline:
+        return
+
+    logo_url = get_airline_logo_url(airline.airline_url)
+    
+    user = auth.get_user(uid)
+    current_claims = user.custom_claims or {}
+
+    new_claims = {
+        **current_claims,
+        "airlineId": airline_id,
+        "airlineName": airline.airline_name,
+        "airlineLogoUrl": logo_url
+    }
+
+    auth.set_custom_user_claims(uid, new_claims)

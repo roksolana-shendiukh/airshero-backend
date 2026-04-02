@@ -6,6 +6,7 @@ from app.database import get_db
 from app.dependencies.auth import require_role
 from app.schemas.passenger_schema import PassengerDTO, PassengerCreateDTO, PassengerUpdateDTO
 from app.services import passenger_service
+from datetime import date
 
 router = APIRouter(prefix="/passengers", tags=["Passengers"])
 
@@ -23,9 +24,26 @@ def search_passenger(
 
 
 @router.get("/search/suggestions")
-def search_document_suggestions(q: str, db: Session = Depends(get_db)):
-    return passenger_service.search_documents(db, q)
+def search_document_suggestions(
+    q: str = Query(..., min_length=2),
+    depart_date: date | None = Query(None),
+    passenger_type: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    return passenger_service.search_documents(db, q, depart_date=depart_date, passenger_type=passenger_type)
 
+
+@router.get("/search/name", response_model=list[PassengerDTO])
+def search_passengers_by_name(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(10, le=50),
+    passenger_type: str | None = Query(None),  
+    depart_date: date | None = Query(None),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    return passenger_service.search_passengers(db, q, limit, passenger_type, depart_date)
 
 @router.get("", response_model=list[PassengerDTO])
 def get_passengers(

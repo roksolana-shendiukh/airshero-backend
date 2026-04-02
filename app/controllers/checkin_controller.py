@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import require_role
-from app.schemas.checkin_schema import IssueBoardingPassDTO
+from app.schemas.checkin_schema import IssueBoardingPassDTO, CalculateBaggageRequestDTO, CalculateBaggageResponseDTO
 from app.schemas.boarding_pass_schema import BoardingPassDTO
 from app.repositories import checkin_repository
 from app.services import checkin_service
@@ -84,3 +84,99 @@ def issue_boarding_pass(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    
+
+@router.get("/active-flights")
+def get_active_flights(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    agent_id = user.get("agentId")
+    if not agent_id:
+        raise HTTPException(status_code=403, detail="Agent not assigned")
+    
+    airport_id = checkin_repository.get_airport_id_by_agent(db, agent_id)
+    if not airport_id:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    flights = checkin_repository.get_active_flights_for_agent(db, airport_id)
+    return flights
+
+
+@router.get("/flight-passengers/suggestions")
+def get_flight_passenger_suggestions(
+    q: str = Query(...),
+    flight_number: str = Query(...),
+    departs_date: str = Query(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    return checkin_service.get_suggestions_for_flight(
+        db, q, flight_number, departs_date
+    )
+
+
+@router.get("/baggage-info/{booking_item_id}")
+def get_baggage_info(
+    booking_item_id: int,
+    db:   Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    info = checkin_repository.get_baggage_info(db, booking_item_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Baggage info not found")
+    return info
+
+
+@router.get("/baggage-types")
+def get_baggage_types(
+    db:   Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    return checkin_repository.get_baggage_types(db)
+
+
+@router.post("/baggage-check")
+def check_baggage_surcharge(
+    booking_item_id: int = Query(...),
+    baggage_units:   list = [],
+    db:   Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    from app.services.checkin_baggage_service import calculate_surcharge
+
+    info = checkin_repository.get_baggage_info(db, booking_item_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Baggage info not found")
+
+    result = calculate_surcharge(info, baggage_units)
+    return {
+        "bookingItemId": booking_item_id,
+        "surcharge":     result["surcharge"],
+        "reasons":       result["reasons"],
+        "hasSurcharge":  result["surcharge"] > 0,
+    }
+
+
+@router.get("/checked-baggage-weight/{flight_operation_id}")
+def get_checked_baggage_weight(
+    flight_operation_id: int,
+    db:   Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    weight = checkin_repository.get_checked_baggage_weight(
+        db, flight_operation_id
+    )
+    return {"totalCheckedWeightKg": weight}
+
+
+@router.post("/baggage/{booking_item_id}/calculate", response_model=CalculateBaggageResponseDTO)
+def calculate_baggage(
+    booking_item_id: int,
+    body: CalculateBaggageRequestDTO,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")) 
+):
+    return checkin_service.calculate_baggage_surcharge(db, booking_item_id, body.bagWeights)
+
+

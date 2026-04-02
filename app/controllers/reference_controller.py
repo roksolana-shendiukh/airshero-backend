@@ -10,10 +10,11 @@ router = APIRouter(tags=["References"])
 
 @router.get("/citizenships")
 def get_citizenships(
+    q: str | None = None,
     db: Session = Depends(get_db),
     user=Depends(require_role("salesAgent")),
 ):
-    return reference_service.get_citizenships(db)
+    return reference_service.get_citizenships(db, q)
 
 
 @router.get("/document-types")
@@ -44,3 +45,6 @@ def get_payment_statuses(
     user=Depends(require_role("salesAgent")),
 ):
     return reference_service.get_payment_statuses(db)
+
+
+

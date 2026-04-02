@@ -18,9 +18,10 @@ from app.controllers import (
     flight_operation_controller,
     gate_controller,
     airfleet_controller,
-    flight_crew_controller
+    flight_crew_controller,
+    planning_controller,
+    airline_controller
 )
-import app.models
 
 app = FastAPI()
 
@@ -47,6 +48,8 @@ app.include_router(flight_operation_controller.router)
 app.include_router(gate_controller.router)
 app.include_router(airfleet_controller.router)
 app.include_router(flight_crew_controller.router)
+app.include_router(planning_controller.router)
+app.include_router(airline_controller.router)
 
 
 @app.on_event("startup")

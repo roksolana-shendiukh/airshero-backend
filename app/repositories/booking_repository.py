@@ -29,6 +29,8 @@ def generate_unique_booking_number(db: Session, max_attempts: int = 5) -> str:
     raise ValueError("Failed to generate unique booking number")
 
 
+from datetime import datetime
+
 def insert_booking(
     db: Session,
     booking_status_id: int,
@@ -39,6 +41,7 @@ def insert_booking(
         booking_status_id=booking_status_id,
         booking_total_amount=total_amount,
         booking_number=booking_number,
+        booking_date_time=datetime.now(),
     )
     db.add(booking)
     db.flush()

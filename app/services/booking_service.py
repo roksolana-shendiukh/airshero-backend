@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
-from app.schemas.booking_schema import CreateBookingDTO
+from app.schemas.booking_schema import CreateBookingDTO, CreateGroupBookingDTO
 from app.repositories import booking_repository
 from app.services import passenger_service
 
@@ -78,7 +78,7 @@ def _build_flight_info(db: Session, booking_id: int) -> dict:
     return result
 
 
-def create_booking(db: Session, data: CreateBookingDTO) -> dict:
+def create_booking(db: Session, data: CreateBookingDTO, auto_commit: bool = True) -> dict:
     booking_number = booking_repository.generate_unique_booking_number(db)
     pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
 
@@ -98,13 +98,33 @@ def create_booking(db: Session, data: CreateBookingDTO) -> dict:
                 p_data.return_flight_price_id, [],
             )
 
-    db.commit()
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    if auto_commit:
+        db.commit()
+
+    expires_at = datetime.now() + timedelta(minutes=10)
     return {
         "bookingId":     booking.booking_id,
         "bookingNumber": booking_number,
-        "expiresAt":     expires_at.isoformat() + "Z",
+        "expiresAt":     expires_at.isoformat(),
     }
+
+
+def create_group_booking(db: Session, data: CreateGroupBookingDTO) -> dict:
+    try:
+        b1 = create_booking(db, data.booking1, auto_commit=False)
+        b2 = create_booking(db, data.booking2, auto_commit=False)
+        db.commit()
+
+        expires_at = datetime.now() + timedelta(minutes=10)
+
+        return {
+            "booking1":  b1,
+            "booking2":  b2,
+            "expiresAt": expires_at.isoformat(),
+        }
+    except Exception as e:
+        db.rollback()
+        raise ValueError(str(e))
 
 
 def validate_booking_for_payment(db: Session, booking_id: int) -> None:
@@ -121,7 +141,7 @@ def validate_booking_for_payment(db: Session, booking_id: int) -> None:
 
 def get_adult_passengers_for_booking(db: Session, booking_id: int) -> list[dict]:
     rows = booking_repository.get_adult_passengers(db, booking_id)
-    today = datetime.utcnow().date()
+    today = datetime.now().date()
     result = []
     for row in rows:
         dob = row.passenger_date_of_birth
@@ -156,4 +176,26 @@ def cancel_booking_if_not_paid(booking_id: int) -> None:
     finally:
         db.close()
 
-        
+
+def cancel_group_booking_if_not_paid(booking_id_1: int, booking_id_2: int) -> None:
+    print(f"[cancel_group_booking_if_not_paid] Started for bookings {booking_id_1}, {booking_id_2}")
+    time.sleep(600)
+
+    db = SessionLocal()
+    try:
+        pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
+        cancelled_id = booking_repository.get_booking_status_id(db, "Cancelled")
+
+        for booking_id in [booking_id_1, booking_id_2]:
+            booking = booking_repository.get_booking_by_id(db, booking_id)
+            if not booking:
+                continue
+            if booking.booking_status_id == pending_status_id:
+                booking_repository.update_booking_status(db, booking_id, cancelled_id)
+                print(f"[cancel_group_booking_if_not_paid] Booking {booking_id} cancelled")
+            else:
+                print(f"[cancel_group_booking_if_not_paid] Booking {booking_id} already paid, skipping")
+
+        db.commit()
+    finally:
+        db.close()

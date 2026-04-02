@@ -21,9 +21,15 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
     def to_time_str(t):
         if t is None:
             return None
+        print(f"[to_time_str] type={type(t)}, value={t}")
         if hasattr(t, 'strftime'):
             return t.strftime('%H:%M:%S')
         return str(t)
+    
+    def to_datetime_str(t):
+        if t is None:
+            return None
+        return t.isoformat()
 
     return FlightOperationDTO(
         flightOperationId        = op.flight_operation_id,
@@ -32,7 +38,7 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
         departsCode              = getattr(dep, 'airport_code', None),
         arrivesCode              = getattr(arr, 'airport_code', None),
         departsDatetime          = getattr(flight, 'departs_datetime', None),
-        arrivesDdatetime         = getattr(flight, 'arrives_datetime', None),
+        arrivesDatetime          = getattr(flight, 'arrives_datetime', None),
         statusId                 = op.flight_operation_status_id,
         statusName               = getattr(op.status, 'flight_operation_status_name', None),
         airfleetId               = op.airfleet_id,
@@ -40,8 +46,8 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
         gateId                   = op.gate_id,
         gateCode                 = getattr(op.gate, 'gate_code', None),
         stateDescription         = getattr(op.state, 'flight_operation_state_description', None),
-        actualDepartureDatetime  = to_time_str(op.actual_departure_date_time),
-        actualArrivalDatetime    = to_time_str(op.actual_arrival_date_time),
+        actualDepartureDatetime  = to_datetime_str(op.actual_departure_date_time),
+        actualArrivalDatetime    = to_datetime_str(op.actual_arrival_date_time),
         boardingStartTime        = to_time_str(op.boarding_start_time),
         boardingEndTime          = to_time_str(op.boarding_end_time),
         baggageLoadingStartTime  = to_time_str(op.baggage_loading_start_time),
@@ -60,17 +66,38 @@ def _clear_active_operation(uid: str, operation_id: int) -> None:
     _save_to_firestore(uid, operation_id)
     user   = firebase_auth.get_user(uid)
     claims = user.custom_claims or {}
+    print(f"[CLAIMS] Terminal status, clearing operationId for uid={uid}")
     claims.pop("operationId", None)
     firebase_auth.set_custom_user_claims(uid, claims)
+    print(f"[CLAIMS] Cleared successfully")
 
 
 def get_all(db: Session) -> list[FlightOperationDTO]:
     return [_map(op) for op in flight_operation_repository.get_all(db)]
 
 
-def get_by_id(db: Session, operation_id: int) -> FlightOperationDTO | None:
+def get_by_id(db: Session, operation_id: int, uid: str | None = None) -> FlightOperationDTO | None:
     op = flight_operation_repository.get_by_id(db, operation_id)
-    return _map(op) if op else None
+    if not op:
+        if uid:
+            try:
+                user   = firebase_auth.get_user(uid)
+                claims = user.custom_claims or {}
+                claims.pop("operationId", None)
+                firebase_auth.set_custom_user_claims(uid, claims)
+                print(f"[CLAIMS] Operation {operation_id} not found, cleared for uid={uid}")
+            except Exception as e:
+                print(f"[CLAIMS] Error clearing: {e}")
+        return None
+
+    mapped = _map(op)
+    if uid and mapped.statusName in _TERMINAL_STATUSES:
+        try:
+            _clear_active_operation(uid, operation_id)
+        except Exception as e:
+            print(f"[CLAIMS] Error clearing: {e}")
+
+    return mapped
 
 
 def create(db: Session, data: FlightOperationCreateDTO, uid: str) -> FlightOperationDTO:
@@ -88,7 +115,13 @@ def create(db: Session, data: FlightOperationCreateDTO, uid: str) -> FlightOpera
     return _map(flight_operation_repository.get_by_id(db, op.flight_operation_id))
 
 
-def update(db: Session, operation_id: int, data: FlightOperationUpdateDTO, uid: str | None = None) -> FlightOperationDTO | None:
+def update(
+    db: Session,
+    operation_id: int,
+    data: FlightOperationUpdateDTO,
+    uid: str | None = None,
+    clear_on_terminal: bool = False,
+) -> FlightOperationDTO | None:
     op = flight_operation_repository.get_by_id(db, operation_id)
     if not op:
         return None
@@ -98,7 +131,7 @@ def update(db: Session, operation_id: int, data: FlightOperationUpdateDTO, uid: 
     updated     = flight_operation_repository.get_by_id(db, operation_id)
     status_name = getattr(updated.status, 'flight_operation_status_name', None)
 
-    if uid and status_name in _TERMINAL_STATUSES:
+    if uid and clear_on_terminal and status_name in _TERMINAL_STATUSES:
         _clear_active_operation(uid, operation_id)
 
     return _map(updated)
@@ -111,6 +144,7 @@ def delete(db: Session, operation_id: int) -> bool:
     flight_operation_repository.delete(db, op)
     db.commit()
     return True
+
 
 def cancel(
     db: Session,
@@ -139,7 +173,7 @@ def cancel(
         flight_operation_status_id=cancelled_status.flight_operation_status_id,
         flight_operation_state_id=actual_state_id,
     )
-    return update(db, operation_id, data, uid=uid)
+    return update(db, operation_id, data, uid=uid, clear_on_terminal=True)
 
 
 def complete(
@@ -169,5 +203,4 @@ def complete(
         flight_operation_status_id=completed_status.flight_operation_status_id,
         flight_operation_state_id=actual_state_id,
     )
-    return update(db, operation_id, data, uid=uid)
-
+    return update(db, operation_id, data, uid=uid, clear_on_terminal=True)

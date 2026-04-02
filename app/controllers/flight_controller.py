@@ -106,4 +106,3 @@ def get_flights_without_operation(
     rows = flight_repository.get_flights_without_operation(db, airline_id, search=search)
     ...
 
-    

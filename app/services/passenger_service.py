@@ -7,6 +7,8 @@ from app.models.document_model import PassengerDocument
 from app.schemas.passenger_schema import PassengerDTO, PassengerCreateDTO, PassengerUpdateDTO
 from app.schemas.document_schema import PassengerDocumentDTO
 from app.repositories import passenger_repository
+from dateutil.relativedelta import relativedelta
+
 
 DOC_FORMATS = {
     'PAS': r'^[A-Z]{2}\d{7}$',
@@ -108,17 +110,91 @@ def get_by_document_number(db: Session, document_number: str) -> PassengerDTO | 
     return _map_passenger(p) if p else None
 
 
-def search_passengers(db: Session, query: str, limit: int = 10) -> list[PassengerDTO]:
-    passengers = passenger_repository.search_partial(db, query, limit)
-    return [dto for p in passengers if (dto := _map_passenger(p))]
+def search_passengers(
+    db: Session,
+    query: str,
+    limit: int = 10,
+    passenger_type: str | None = None,
+    depart_date: date | None = None,
+) -> list[PassengerDTO]:
+    passengers = passenger_repository.search_partial(db, query, limit * 5)
+    
+    result =[]
+    p_type = passenger_type.lower() if passenger_type else None
+    ref_date = depart_date or date.today()
+    
+    for p in passengers:
+        dto = _map_passenger(p)
+        if dto is None:
+            continue
+        
+        if p_type:
+            if not dto.date_of_birth:
+                continue
+            
+            dob = dto.date_of_birth if isinstance(dto.date_of_birth, date) \
+                else date.fromisoformat(str(dto.date_of_birth))
+            age = relativedelta(ref_date, dob).years
+            
+            if p_type == 'adult' and age < 12:
+                continue
+            elif p_type == 'child' and not (3 <= age <= 11):
+                continue
+            elif p_type == 'infant' and age > 2: 
+                continue
+        
+        result.append(dto)
+        if len(result) >= limit:
+            break
+    
+    return result
 
 
-def search_documents(db: Session, query: str, limit: int = 10) -> list[dict]:
+def search_documents(
+    db: Session,
+    query: str,
+    limit: int = 10,
+    depart_date: date | None = None,
+    passenger_type: str | None = None,
+) -> list[dict]:
     if not query:
-        return []
-    docs = passenger_repository.search_documents_partial(db, query, limit)
-    return [
-        {
+        return[]
+        
+    docs = passenger_repository.search_documents_partial(db, query, limit * 5)
+
+    min_expire = None
+    if depart_date:
+        min_expire = depart_date + relativedelta(months=2)
+
+    p_type = passenger_type.lower() if passenger_type else None
+    result =[]
+
+    for d in docs:
+        if min_expire and (
+            d.document_date_of_expire is None or
+            d.document_date_of_expire < min_expire
+        ):
+            continue
+
+        if p_type:
+            if not d.passenger.passenger_date_of_birth:
+                continue
+                
+            dob = d.passenger.passenger_date_of_birth
+            if not isinstance(dob, date):
+                dob = date.fromisoformat(str(dob))
+                
+            ref_date = depart_date or date.today()
+            age = relativedelta(ref_date, dob).years
+
+            if p_type == 'adult' and age < 12:
+                continue
+            elif p_type == 'child' and not (3 <= age <= 11):
+                continue
+            elif p_type == 'infant' and age > 2:  
+                continue
+
+        result.append({
             "passenger_id":            d.passenger.passenger_id,
             "first_name":              d.passenger.passenger_first_name,
             "last_name":               d.passenger.passenger_last_name,
@@ -127,10 +203,12 @@ def search_documents(db: Session, query: str, limit: int = 10) -> list[dict]:
             "citizenship_name":        getattr(d.citizenship, "citizenship_name", None),
             "document_date_of_issue":  d.document_date_of_issue,
             "document_date_of_expire": d.document_date_of_expire,
-        }
-        for d in docs
-    ]
+        })
+        
+        if len(result) >= limit:
+            break
 
+    return result
 
 def create_passenger(db: Session, data: PassengerCreateDTO) -> PassengerDTO:
     validate_document(

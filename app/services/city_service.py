@@ -29,4 +29,12 @@ def get_alternative_destinations(db: Session, from_city_id: int) -> list[CityDTO
 
 def get_available_dates(db: Session, from_city_id: int, to_city_id: int) -> list[str]:
     rows = city_repository.get_available_flight_dates(db, from_city_id, to_city_id)
-    return list({row.departs_datetime.strftime("%Y-%m-%d") for row in rows})
+    print(f"Raw rows count: {len(rows)}")
+    for row in rows:
+        print(f"  {row.departs_datetime}")
+    dates = list({row.departs_datetime.strftime("%Y-%m-%d") for row in rows})
+    print(f"After set: {dates}")
+    return dates
+
+
+

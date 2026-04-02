@@ -1,9 +1,14 @@
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import aliased
 from app.models.airport_model import Airport
-from app.models.flight_model import Flight, FlightClass
+from app.models.flight_model import Flight, FlightStatus
 from app.models.flight_schedule_model import FlightSchedule
 from app.models.route_model import Route
+from app.models.flight_model import Flight
+from app.models.route_model import Route
+from datetime import date
+from sqlalchemy import or_
 
 
 _SEARCH_CITIES = text("""
@@ -47,24 +52,37 @@ def get_alternative_destinations(db: Session, from_city_id: int) -> list:
     )
 
 
+
+
 def get_available_flight_dates(db: Session, from_city_id: int, to_city_id: int) -> list:
+    DepAirport = aliased(Airport)
+    ArrAirport = aliased(Airport)
+    today = date.today()
+
     return (
         db.query(Flight.departs_datetime)
         .join(FlightSchedule, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
         .join(Route, FlightSchedule.route_id == Route.route_id)
-        .join(
-            Airport.__table__.alias("dep"),
-            text("dep.airport_id = Route.departs_airport_id"),
-        )
-        .join(
-            Airport.__table__.alias("arr"),
-            text("arr.airport_id = Route.arrives_airport_id"),
-        )
+        .join(DepAirport, DepAirport.airport_id == Route.departs_airport_id)
+        .join(ArrAirport, ArrAirport.airport_id == Route.arrives_airport_id)
+        .join(FlightStatus, Flight.flight_status_id == FlightStatus.flight_status_id)
         .filter(
-            text("dep.city_id = :from_id").bindparams(from_id=from_city_id),
-            text("arr.city_id = :to_id").bindparams(to_id=to_city_id),
+            DepAirport.city_id == from_city_id,
+            ArrAirport.city_id == to_city_id,
+            FlightStatus.flight_status_name != 'Cancelled',
+            Flight.departs_datetime >= today,
+            or_(
+                FlightSchedule.flight_end_date.is_(None),
+                FlightSchedule.flight_end_date >= today,
+            ),
         )
         .distinct()
         .order_by(Flight.departs_datetime)
         .all()
     )
+
+
+
+
+
+

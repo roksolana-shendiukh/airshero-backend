@@ -3,10 +3,14 @@ from sqlalchemy import text
 from app.models.document_model import DocumentType
 from app.models.citizenship_model import Citizenship
 from app.models.payment_model import PaymentMethod, PaymentStatus
+from app.models.baggage_model import BaggageType
 
 
-def get_citizenships(db: Session) -> list[dict]:
-    rows = db.query(Citizenship).all()
+def get_citizenships(db: Session, query: str | None = None) -> list[dict]:
+    rows = db.query(Citizenship)
+    if query:
+        rows = rows.filter(Citizenship.citizenship_name.ilike(f"%{query}%"))
+    rows = rows.order_by(Citizenship.citizenship_name).all()
     return [
         {"citizenshipId": r.citizenship_id, "citizenshipName": r.citizenship_name}
         for r in rows
@@ -68,3 +72,15 @@ def get_payment_statuses(db: Session) -> list[dict]:
 
 def get_sexes() -> list[dict]:
     return [{"id": 0, "name": "Female"}, {"id": 1, "name": "Male"}]
+
+
+def get_all_baggage_types(db: Session) -> list[dict]:
+
+    rows = db.query(BaggageType).all()
+    return[
+        {
+            "baggageTypeId": r.baggage_type_id,
+            "baggageTypeName": r.baggage_type_name
+        }
+        for r in rows
+    ]

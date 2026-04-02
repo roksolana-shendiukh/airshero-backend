@@ -51,3 +51,25 @@ class IssueBoardingPassDTO(BaseModel):
     seat_layout_id: int
     baggage_units: List[BaggageUnitInputDTO] = []
     checkin_payment: Optional[CheckinPaymentInputDTO] = None
+
+
+class CalculateBaggageRequestDTO(BaseModel):
+    bagWeights: List[float]
+
+class BagDetail(BaseModel):
+    weight: float
+    determinedTypeName: str
+    determinedDimensions: str
+    isPreBookedSlot: bool
+    surcharge: float
+    message: str
+
+class AllowanceDTO(BaseModel):
+    quantity: int
+    maxWeight: float
+    typeName: str
+
+class CalculateBaggageResponseDTO(BaseModel):
+    preBookedAllowance: Optional[AllowanceDTO] = None
+    totalSurcharge: float
+    bags: List[BagDetail]
