@@ -27,3 +27,10 @@ def get_alternatives(
 ):
     alternatives = route_service.get_flight_alternatives(db, from_city, to_city)
     return alternatives
+
+
+
+
+
+
+

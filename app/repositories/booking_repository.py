@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from app.models.booking_model import Booking, BookingItem, BookingStatus
 from app.models.baggage_model import BaggageOptionInFlight
+from datetime import datetime
 
 
 def get_booking_status_id(db: Session, name: str) -> int:
@@ -28,8 +29,6 @@ def generate_unique_booking_number(db: Session, max_attempts: int = 5) -> str:
             return number
     raise ValueError("Failed to generate unique booking number")
 
-
-from datetime import datetime
 
 def insert_booking(
     db: Session,
@@ -79,10 +78,10 @@ def insert_baggage_option(
 
 
 def update_booking_status(db: Session, booking_id: int, booking_status_id: int) -> None:
-    db.query(Booking).filter(Booking.booking_id == booking_id).update(
-        {"booking_status_id": booking_status_id}
+    db.execute(
+        text("UPDATE Booking SET booking_status_id = :status_id WHERE booking_id = :booking_id"),
+        {"status_id": booking_status_id, "booking_id": booking_id}
     )
-
 
 def get_booking_by_id(db: Session, booking_id: int) -> Booking | None:
     return (
@@ -162,3 +161,84 @@ def get_booking_flight_info_rows(db: Session, booking_id: int) -> list:
         LEFT JOIN BaggagePricingInFlight bpf ON bof.baggage_pricing_in_flight_id = bpf.baggage_pricing_in_flight_id
         WHERE bi.booking_id = :booking_id
     """), {"booking_id": booking_id}).fetchall()
+
+
+def check_seat_availability(
+    db: Session,
+    flight_price_id: int,
+    required_seats: int = 1,
+) -> tuple[bool, str]:
+    sql = text("""
+        SELECT fa.class_name, fa.available_seats
+        FROM FlightPrice fp
+        JOIN FlightClass fc ON fc.flight_class_id = fp.flight_class_id
+        JOIN Class c ON c.class_id = fc.class_id
+        CROSS APPLY FN_GetFlightAvailability(fc.flight_id) fa
+        WHERE fp.flight_price_id = :flight_price_id
+          AND fa.class_name = c.class_name
+    """)
+    row = db.execute(sql, {"flight_price_id": flight_price_id}).fetchone()
+    if not row:
+        return False, "Flight or class not found"
+    if row.available_seats < required_seats:
+        return False, f"Not enough seats in {row.class_name}. Available: {row.available_seats}"
+    return True, "OK"
+
+
+def insert_booking_item_no_passenger(db: Session, booking_id: int, flight_price_id: int):
+    sql = text("""
+        INSERT INTO BookingItem (booking_id, flight_price_id)
+        VALUES (:booking_id, :flight_price_id)
+    """)
+    db.execute(sql, {"booking_id": booking_id, "flight_price_id": flight_price_id})
+    db.flush()
+
+def delete_booking_items(db: Session, booking_id: int):
+    db.execute(
+        text("""
+            DELETE FROM BaggageOptionInFlight 
+            WHERE booking_item_id IN (
+                SELECT booking_item_id FROM BookingItem WHERE booking_id = :booking_id
+            )
+        """),
+        {"booking_id": booking_id}
+    )
+    db.execute(
+        text("DELETE FROM BookingItem WHERE booking_id = :booking_id"),
+        {"booking_id": booking_id}
+    )
+    db.flush()
+
+def update_booking_amount(db: Session, booking_id: int, amount: float):
+    sql = text("""
+        UPDATE Booking SET booking_total_amount = :amount WHERE booking_id = :booking_id
+    """)
+    db.execute(sql, {"amount": amount, "booking_id": booking_id})
+    db.flush()
+
+def get_passengers_with_email(db: Session, booking_id: int) -> list[dict]:
+    rows = db.execute(text("""
+        SELECT DISTINCT
+            p.passenger_id,
+            p.passenger_first_name,
+            p.passenger_last_name,
+            p.passenger_email
+        FROM BookingItem bi
+        JOIN PassengerDocument pd ON bi.passenger_document_id = pd.passenger_document_id
+        JOIN Passenger p ON pd.passenger_id = p.passenger_id
+        WHERE bi.booking_id = :booking_id
+          AND p.passenger_email IS NOT NULL
+          AND p.passenger_email != ''
+    """), {"booking_id": booking_id}).fetchall()
+    
+    return [
+        {
+            "passengerId": r.passenger_id,
+            "firstName": r.passenger_first_name,
+            "lastName": r.passenger_last_name,
+            "email": r.passenger_email,
+        }
+        for r in rows
+    ]
+
+

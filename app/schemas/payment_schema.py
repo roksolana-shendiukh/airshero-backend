@@ -8,3 +8,4 @@ class PaymentDTO(BaseModel):
     status: str
     email: Optional[str] = None
     passengerId: Optional[int] = None
+    booking_id_2: Optional[int] = None

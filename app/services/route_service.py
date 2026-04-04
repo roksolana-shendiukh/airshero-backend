@@ -160,4 +160,5 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
     }
 
 
+    
 

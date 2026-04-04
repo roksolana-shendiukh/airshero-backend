@@ -4,7 +4,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.dependencies.auth import require_role
-from app.schemas.booking_schema import CreateBookingDTO, BookingResponseDTO, CreateGroupBookingDTO
+from app.schemas.booking_schema import (
+    CreateBookingDTO, BookingResponseDTO, CreateGroupBookingDTO,
+    ReserveBookingDTO, ReserveGroupBookingDTO, UpdatePassengersDTO,
+)
 from app.schemas.payment_schema import PaymentDTO
 from app.services import booking_service, payment_service
 
@@ -60,6 +63,57 @@ def create_group_booking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@router.post("/reserve", response_model=BookingResponseDTO, status_code=201)
+def reserve_booking(
+    data: ReserveBookingDTO,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    try:
+        result = booking_service.reserve_booking(db, data)
+        background_tasks.add_task(
+            booking_service.cancel_booking_if_not_paid,
+            result["bookingId"],
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Booking reservation failed: " + str(e.orig))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reserve/group", status_code=201)
+def reserve_group_booking(
+    data: ReserveGroupBookingDTO,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    try:
+        result = booking_service.reserve_group_booking(db, data)
+        background_tasks.add_task(
+            booking_service.cancel_group_booking_if_not_paid,
+            result["booking1"]["bookingId"],
+            result["booking2"]["bookingId"],
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Group booking reservation failed: " + str(e.orig))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.post("/{booking_id}/payment")
 def process_payment(
     booking_id: int,
@@ -93,4 +147,25 @@ def get_adult_passengers(
     user=Depends(require_role("salesAgent")),
 ):
     return booking_service.get_adult_passengers_for_booking(db, booking_id)
+
+
+
+@router.patch("/{booking_id}/passengers", status_code=200)
+def update_booking_passengers(
+    booking_id: int,
+    data: UpdatePassengersDTO,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    try:
+        booking_service.update_booking_passengers(db, booking_id, data)
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 

@@ -37,7 +37,7 @@ def search_flights(
             "ticketPrice":     float(r["ticket_price"]),
             "flightStatus":    r["flight_status_name"],
             "airlineName":     r["airline_name"],
-            "airlineLogoUrl":  r["airline_logo_url"] or "",
+            "airlineLogoUrl":  f"https://storage.googleapis.com/airshero-b81e4.firebasestorage.app/airlines/{r['airline_logo_url']}/{r['airline_logo_url']}.png" if r["airline_logo_url"] else "",
         }
         for r in rows
     ]
@@ -105,4 +105,55 @@ def get_flights_without_operation(
         raise HTTPException(status_code=403, detail="No airline assigned to this user")
     rows = flight_repository.get_flights_without_operation(db, airline_id, search=search)
     ...
+
+
+@router.get("/{flight_id}/availability")
+def get_flight_availability(
+    flight_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    from sqlalchemy import text
+    sql = text("""
+        SELECT class_name, total_seats, booked_seats, available_seats
+        FROM FN_GetFlightAvailability(:flight_id)
+    """)
+    rows = db.execute(sql, {"flight_id": flight_id}).fetchall()
+    return [
+        {
+            "className":      r.class_name,
+            "totalSeats":     r.total_seats,
+            "bookedSeats":    r.booked_seats,
+            "availableSeats": max(r.available_seats, 0),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/availability")
+def get_flights_availability(
+    flight_ids: list[int],
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    from sqlalchemy import text
+    result = {}
+    for flight_id in flight_ids:
+        sql = text("""
+            SELECT class_name, total_seats, booked_seats, available_seats
+            FROM FN_GetFlightAvailability(:flight_id)
+        """)
+        rows = db.execute(sql, {"flight_id": flight_id}).fetchall()
+        result[flight_id] = [
+            {
+                "className":      r.class_name,
+                "totalSeats":     r.total_seats,
+                "bookedSeats":    r.booked_seats,
+                "availableSeats": max(r.available_seats, 0),
+            }
+            for r in rows
+        ]
+    return result
+
+
 

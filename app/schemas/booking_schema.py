@@ -14,6 +14,7 @@ class BookingPassengerDTO(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     sex: Optional[bool] = None
+    email: Optional[str] = None 
     date_of_birth: Optional[str] = None
     citizenship_id: Optional[int] = None
     document_type_id: Optional[int] = None
@@ -47,7 +48,20 @@ class GroupBookingResponseDTO(BaseModel):
     expiresAt: datetime
 
 
-class PaymentDTO(BaseModel):
-    paymentMethodId: int
-    status: str
-    amount: float
+    
+
+class ReservePassengerDTO(BaseModel):
+    flight_price_id: int
+    return_flight_price_id: Optional[int] = None
+
+class ReserveBookingDTO(BaseModel):
+    passengers: list[ReservePassengerDTO]
+    total_amount: float
+
+class ReserveGroupBookingDTO(BaseModel):
+    booking1: ReserveBookingDTO
+    booking2: ReserveBookingDTO
+
+class UpdatePassengersDTO(BaseModel):
+    passengers: list[BookingPassengerDTO]
+    total_amount: Optional[float] = None

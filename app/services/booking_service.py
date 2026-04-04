@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
-from app.schemas.booking_schema import CreateBookingDTO, CreateGroupBookingDTO
+from app.schemas.booking_schema import CreateBookingDTO, CreateGroupBookingDTO, ReserveBookingDTO, ReserveGroupBookingDTO, UpdatePassengersDTO
 from app.repositories import booking_repository
 from app.services import passenger_service
 
@@ -79,6 +79,20 @@ def _build_flight_info(db: Session, booking_id: int) -> dict:
 
 
 def create_booking(db: Session, data: CreateBookingDTO, auto_commit: bool = True) -> dict:
+    from collections import Counter
+    flight_price_counts: Counter = Counter()
+    for p_data in data.passengers:
+        flight_price_counts[p_data.flight_price_id] += 1
+        if p_data.return_flight_price_id:
+            flight_price_counts[p_data.return_flight_price_id] += 1
+
+    for flight_price_id, required in flight_price_counts.items():
+        is_available, message = booking_repository.check_seat_availability(
+            db, flight_price_id, required
+        )
+        if not is_available:
+            raise ValueError(message)
+
     booking_number = booking_repository.generate_unique_booking_number(db)
     pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
 
@@ -101,13 +115,12 @@ def create_booking(db: Session, data: CreateBookingDTO, auto_commit: bool = True
     if auto_commit:
         db.commit()
 
-    expires_at = datetime.now() + timedelta(minutes=10)
+    expires_at = datetime.now() + timedelta(minutes=30)
     return {
         "bookingId":     booking.booking_id,
         "bookingNumber": booking_number,
         "expiresAt":     expires_at.isoformat(),
     }
-
 
 def create_group_booking(db: Session, data: CreateGroupBookingDTO) -> dict:
     try:
@@ -115,7 +128,7 @@ def create_group_booking(db: Session, data: CreateGroupBookingDTO) -> dict:
         b2 = create_booking(db, data.booking2, auto_commit=False)
         db.commit()
 
-        expires_at = datetime.now() + timedelta(minutes=10)
+        expires_at = datetime.now() + timedelta(minutes=30)
 
         return {
             "booking1":  b1,
@@ -158,7 +171,7 @@ def get_adult_passengers_for_booking(db: Session, booking_id: int) -> list[dict]
 
 def cancel_booking_if_not_paid(booking_id: int) -> None:
     print(f"[cancel_booking_if_not_paid] Started for booking_id={booking_id}")
-    time.sleep(600)
+    time.sleep(1800)
 
     db = SessionLocal()
     try:
@@ -179,7 +192,7 @@ def cancel_booking_if_not_paid(booking_id: int) -> None:
 
 def cancel_group_booking_if_not_paid(booking_id_1: int, booking_id_2: int) -> None:
     print(f"[cancel_group_booking_if_not_paid] Started for bookings {booking_id_1}, {booking_id_2}")
-    time.sleep(600)
+    time.sleep(1800)
 
     db = SessionLocal()
     try:
@@ -199,3 +212,89 @@ def cancel_group_booking_if_not_paid(booking_id_1: int, booking_id_2: int) -> No
         db.commit()
     finally:
         db.close()
+
+
+def reserve_booking(db: Session, data, auto_commit: bool = True) -> dict:
+    from collections import Counter
+    flight_price_counts: Counter = Counter()
+    for p in data.passengers:
+        flight_price_counts[p.flight_price_id] += 1
+        if p.return_flight_price_id:
+            flight_price_counts[p.return_flight_price_id] += 1
+
+    for flight_price_id, required in flight_price_counts.items():
+        is_available, message = booking_repository.check_seat_availability(
+            db, flight_price_id, required
+        )
+        if not is_available:
+            raise ValueError(message)
+
+    booking_number = booking_repository.generate_unique_booking_number(db)
+    pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
+
+    booking = booking_repository.insert_booking(
+        db, pending_status_id, data.total_amount, booking_number
+    )
+
+    for p in data.passengers:
+        booking_repository.insert_booking_item_no_passenger(
+            db, booking.booking_id, p.flight_price_id
+        )
+        if p.return_flight_price_id:
+            booking_repository.insert_booking_item_no_passenger(
+                db, booking.booking_id, p.return_flight_price_id
+            )
+
+    if auto_commit:
+        db.commit()
+
+    expires_at = datetime.now() + timedelta(minutes=30)
+    return {
+        "bookingId": booking.booking_id,
+        "bookingNumber": booking_number,
+        "expiresAt": expires_at.isoformat(),
+    }
+
+
+def reserve_group_booking(db: Session, data) -> dict:
+    try:
+        b1 = reserve_booking(db, data.booking1, auto_commit=False)
+        b2 = reserve_booking(db, data.booking2, auto_commit=False)
+        db.commit()
+        expires_at = datetime.now() + timedelta(minutes=30)
+        return {
+            "booking1": b1,
+            "booking2": b2,
+            "expiresAt": expires_at.isoformat(),
+        }
+    except Exception as e:
+        db.rollback()
+        raise ValueError(str(e))
+    
+
+def update_booking_passengers(db: Session, booking_id: int, data: UpdatePassengersDTO) -> None:
+    booking = booking_repository.get_booking_by_id(db, booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+
+    booking_repository.delete_booking_items(db, booking_id)
+
+    for p_data in data.passengers:
+        document_id = passenger_service.get_or_create_document_id(db, p_data)
+        _insert_booking_item_with_baggage(
+            db, booking_id, document_id,
+            p_data.flight_price_id, p_data.baggage_items,
+        )
+        if p_data.return_flight_price_id:
+            _insert_booking_item_with_baggage(
+                db, booking_id, document_id,
+                p_data.return_flight_price_id, [],
+            )
+
+    if data.total_amount is not None:
+        booking_repository.update_booking_amount(db, booking_id, data.total_amount)
+
+    db.commit()
+
+
+

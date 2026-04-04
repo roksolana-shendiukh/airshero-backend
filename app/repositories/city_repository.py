@@ -9,6 +9,7 @@ from app.models.flight_model import Flight
 from app.models.route_model import Route
 from datetime import date
 from sqlalchemy import or_
+from datetime import datetime, timedelta
 
 
 _SEARCH_CITIES = text("""
@@ -71,6 +72,44 @@ def get_available_flight_dates(db: Session, from_city_id: int, to_city_id: int) 
             ArrAirport.city_id == to_city_id,
             FlightStatus.flight_status_name != 'Cancelled',
             Flight.departs_datetime >= today,
+            or_(
+                FlightSchedule.flight_end_date.is_(None),
+                FlightSchedule.flight_end_date >= today,
+            ),
+        )
+        .distinct()
+        .order_by(Flight.departs_datetime)
+        .all()
+    )
+
+
+def get_leg2_flight_dates(
+    db: Session,
+    hub_city_id: int,
+    to_city_id: int,
+    leg1_date: str,
+) -> list:
+    DepAirport = aliased(Airport)
+    ArrAirport = aliased(Airport)
+    today = date.today()
+
+    leg1 = datetime.strptime(leg1_date, "%Y-%m-%d").date()
+    min_date = leg1
+    max_date = leg1 + timedelta(days=1)
+
+    return (
+        db.query(Flight.departs_datetime)
+        .join(FlightSchedule, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
+        .join(Route, FlightSchedule.route_id == Route.route_id)
+        .join(DepAirport, DepAirport.airport_id == Route.departs_airport_id)
+        .join(ArrAirport, ArrAirport.airport_id == Route.arrives_airport_id)
+        .join(FlightStatus, Flight.flight_status_id == FlightStatus.flight_status_id)
+        .filter(
+            DepAirport.city_id == hub_city_id,
+            ArrAirport.city_id == to_city_id,
+            FlightStatus.flight_status_name != 'Cancelled',
+            Flight.departs_datetime >= datetime.combine(min_date, datetime.min.time()),
+            Flight.departs_datetime <= datetime.combine(max_date, datetime.max.time()),
             or_(
                 FlightSchedule.flight_end_date.is_(None),
                 FlightSchedule.flight_end_date >= today,

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-
+import random
+import string
 
 def get_passenger_booking(
     db: Session,
@@ -200,20 +201,24 @@ def get_baggage_types(db: Session) -> list:
     ]
 
 
-def get_checked_baggage_weight(db: Session, flight_operation_id: int) -> float:
-    sql = text("""
-        SELECT ISNULL(SUM(bu.baggage_unit_weight_kg), 0) AS total_weight
-        FROM FlightOperation fo
-        JOIN BoardingPass bp ON bp.flight_operation_id = fo.flight_operation_id
-        JOIN BaggageUnit bu  ON bu.boarding_pass_id    = bp.boarding_pass_id
-        JOIN BaggageType bt  ON bt.baggage_type_id     = bu.baggage_type_id
-        WHERE fo.flight_operation_id = :flight_operation_id
-          AND bt.baggage_type_name != 'Carry-on baggage'
+def get_checked_baggage_weight(db: Session, flight_operation_id: int):
+    weight_sql = text("""
+        SELECT dbo.FN_GetCheckedBaggageWeight(:flight_operation_id) AS total_weight
     """)
-    result = db.execute(
-        sql, {"flight_operation_id": flight_operation_id}
-    ).mappings().first()
-    return float(result["total_weight"]) if result else 0.0
+    capacity_sql = text("""
+        SELECT a.baggage_capacity
+        FROM FlightOperation fo
+        JOIN Airfleet a ON a.airfleet_id = fo.airfleet_id
+        WHERE fo.flight_operation_id = :flight_operation_id
+    """)
+    
+    weight   = db.execute(weight_sql,   {"flight_operation_id": flight_operation_id}).mappings().first()
+    capacity = db.execute(capacity_sql, {"flight_operation_id": flight_operation_id}).mappings().first()
+
+    return {
+        "totalCheckedWeightKg": float(weight["total_weight"])          if weight   else 0.0,
+        "baggageCapacityKg":    float(capacity["baggage_capacity"])    if capacity else 0.0,
+    }
 
 
 def get_flight_info_for_booking_item(db: Session, booking_item_id: int) -> dict | None:
@@ -263,3 +268,139 @@ def get_flight_class_baggage_rules(db: Session, flight_class_id: int) -> list[di
         ORDER BY bpr.baggage_max_weight ASC
     """)
     return [dict(row) for row in db.execute(sql, {"flight_class_id": flight_class_id}).mappings().all()]
+
+
+def get_payment_methods(db: Session) -> list:
+    sql = text("""
+        SELECT payment_method_id, payment_method_name
+        FROM PaymentMethod
+        ORDER BY payment_method_id
+    """)
+    rows = db.execute(sql).mappings().all()
+    return [
+        {
+            "paymentMethodId":   r["payment_method_id"],
+            "paymentMethodName": r["payment_method_name"],
+        }
+        for r in rows
+    ]
+
+
+def issue_boarding_pass_with_baggage(
+    db: Session,
+    booking_item_id: int,
+    seat_layout_id: int,
+    flight_operation_id: int,
+    checkin_agent_id: int,
+    bags: list[dict],
+    payment_method_id: int | None,
+    total_surcharge: float,
+    status: str,
+) -> dict:
+    existing_sql = text("""
+        SELECT boarding_pass_id, boarding_pass_ticket_number
+        FROM BoardingPass
+        WHERE booking_item_id = :booking_item_id
+    """)
+    existing = db.execute(existing_sql, {"booking_item_id": booking_item_id}).mappings().first()
+    if existing:
+        raise ValueError(f"Passenger already checked in. Boarding pass: {existing['boarding_pass_ticket_number']}")
+
+    ticket_number = 'BP' + ''.join(random.choices(string.digits, k=8))
+
+    bp_sql = text("""
+        INSERT INTO BoardingPass (
+            checkin_agent_id, seat_layout_id, booking_item_id,
+            flight_operation_id, boarding_pass_issue_date_time,
+            boarding_pass_ticket_number
+        )
+        OUTPUT INSERTED.boarding_pass_id, INSERTED.boarding_pass_ticket_number
+        VALUES (
+            :agent_id, :seat_layout_id, :booking_item_id,
+            :flight_operation_id, GETDATE(), :ticket_number
+        )
+    """)
+    bp = db.execute(bp_sql, {
+        "agent_id":            checkin_agent_id,
+        "seat_layout_id":      seat_layout_id,
+        "booking_item_id":     booking_item_id,
+        "flight_operation_id": flight_operation_id,
+        "ticket_number":       ticket_number,
+    }).mappings().first()
+
+    boarding_pass_id = bp["boarding_pass_id"]
+
+    bag_ids = []
+    for bag in bags:
+        tracking = 'TK' + ''.join(random.choices(string.digits, k=10))
+        bu_sql = text("""
+            INSERT INTO BaggageUnit (
+                boarding_pass_id, baggage_type_id,
+                baggage_unit_tracking_number, baggage_unit_weight_kg
+            )
+            OUTPUT INSERTED.baggage_unit_id
+            VALUES (
+                :boarding_pass_id, :baggage_type_id,
+                :tracking, :weight
+            )
+        """)
+        bu = db.execute(bu_sql, {
+            "boarding_pass_id": boarding_pass_id,
+            "baggage_type_id":  bag["baggage_type_id"],
+            "tracking":         tracking,
+            "weight":           bag["baggage_unit_weight_kg"],
+        }).mappings().first()
+        bag_ids.append(bu["baggage_unit_id"])
+
+    checkin_payment_id = None
+    if total_surcharge > 0 and payment_method_id:
+        pay_sql = text("""
+            INSERT INTO CheckinInPayment (
+                payment_status_id, payment_method_id,
+                checkin_payment_date_time, checkin_payment_amount
+            )
+            OUTPUT INSERTED.checkin_payment_id
+            VALUES (
+                (SELECT payment_status_id FROM PaymentStatus WHERE payment_status_name = :status),
+                :method_id, GETDATE(), :amount
+            )
+        """)
+        pay = db.execute(pay_sql, {
+            "method_id": payment_method_id,
+            "amount":    total_surcharge,
+            "status":    status,
+        }).mappings().first()
+        checkin_payment_id = pay["checkin_payment_id"]
+
+        for bag_id in bag_ids:
+            db.execute(text("""
+                INSERT INTO BaggageUnitCheckInPayment (baggage_unit_id, checkin_payment_id)
+                VALUES (:bag_id, :payment_id)
+            """), {"bag_id": bag_id, "payment_id": checkin_payment_id})
+
+    db.commit()
+
+    return {
+        "boardingPassId":   boarding_pass_id,
+        "ticketNumber":     ticket_number,
+        "checkinPaymentId": checkin_payment_id,
+        "bagCount":         len(bag_ids),
+    }
+
+
+def get_checkin_agent_by_user_id(db: Session, agent_id: int):
+    sql = text("""
+        SELECT checkin_agent_id
+        FROM CheckInAgent
+        WHERE checkin_agent_id = :agent_id
+    """)
+    return db.execute(sql, {"agent_id": agent_id}).mappings().first()
+
+def check_already_checked_in(db: Session, booking_item_id: int) -> dict | None:
+    sql = text("""
+        SELECT bp.boarding_pass_id, bp.boarding_pass_ticket_number
+        FROM BoardingPass bp
+        WHERE bp.booking_item_id = :booking_item_id
+    """)
+    row = db.execute(sql, {"booking_item_id": booking_item_id}).mappings().first()
+    return dict(row) if row else None

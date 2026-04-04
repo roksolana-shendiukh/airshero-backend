@@ -101,9 +101,13 @@ def update(db: Session, passenger: Passenger, data: PassengerUpdateDTO) -> Passe
         passenger.passenger_last_name = data.last_name
     if data.sex is not None:
         passenger.passenger_sex = data.sex
+    if data.sex is not None:
+        passenger.passenger_sex = data.sex
     return passenger
 
 
 def delete(db: Session, passenger: Passenger) -> None:
     db.delete(passenger)
     db.commit()
+
+

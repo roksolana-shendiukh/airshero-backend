@@ -1,8 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel,field_validator
 from datetime import date, datetime
 from typing import Optional, List
 from .baggage_schema import BaggageUnitInputDTO
-
 
 class DocumentInfoDTO(BaseModel):
     document_id: int
@@ -73,3 +72,25 @@ class CalculateBaggageResponseDTO(BaseModel):
     preBookedAllowance: Optional[AllowanceDTO] = None
     totalSurcharge: float
     bags: List[BagDetail]
+
+
+class BagUnitDTO(BaseModel):
+    baggage_type_id:        int
+    baggage_unit_weight_kg: float
+
+
+class IssueCheckinDTO(BaseModel):
+    booking_item_id:   int
+    seat_layout_id:    int
+    bags:              list[BagUnitDTO]
+    payment_method_id: int | None = None
+    total_surcharge:   float = 0.0
+    status:            str
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v not in ('Paid', 'Failed', 'Pending'):
+            raise ValueError('status must be Paid, Failed or Pending')
+        return v
+    

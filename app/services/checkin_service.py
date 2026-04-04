@@ -100,4 +100,57 @@ def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: 
         "bags": bags_result
     }
 
+def check_already_checked_in(db: Session, booking_item_id: int) -> dict:
+    result = checkin_repository.check_already_checked_in(db, booking_item_id)
+    return {
+        "alreadyCheckedIn": result is not None,
+        "ticketNumber": result["boarding_pass_ticket_number"] if result else None,
+    }
 
+def get_seat_map(db: Session, flight_operation_id: int):
+    return checkin_repository.get_seat_map(db, flight_operation_id)
+
+
+def get_active_flights(db: Session, agent_id: int):
+    airport_id = checkin_repository.get_airport_id_by_agent(db, agent_id)
+    if not airport_id:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return checkin_repository.get_active_flights_for_agent(db, airport_id)
+
+
+def get_baggage_info(db: Session, booking_item_id: int):
+    return checkin_repository.get_baggage_info(db, booking_item_id)
+
+
+def get_baggage_types(db: Session):
+    return checkin_repository.get_baggage_types(db)
+
+
+def get_checked_baggage_weight(db: Session, flight_operation_id: int):
+    return checkin_repository.get_checked_baggage_weight(db, flight_operation_id)
+
+
+def check_already_checked_in(db: Session, booking_item_id: int) -> dict:
+    result = checkin_repository.check_already_checked_in(db, booking_item_id)
+    return {
+        "alreadyCheckedIn": result is not None,
+        "ticketNumber": result["boarding_pass_ticket_number"] if result else None,
+    }
+
+
+def issue_with_baggage(db: Session, data, flight_operation_id: int, checkin_agent_id: int) -> dict:
+    agent = checkin_repository.get_checkin_agent_by_user_id(db, checkin_agent_id)
+    if not agent:
+        raise ValueError("Check-in agent not found")
+
+    return checkin_repository.issue_boarding_pass_with_baggage(
+        db=db,
+        booking_item_id=data.booking_item_id,
+        seat_layout_id=data.seat_layout_id,
+        flight_operation_id=flight_operation_id,
+        checkin_agent_id=agent["checkin_agent_id"],
+        bags=[b.dict() for b in data.bags],
+        payment_method_id=data.payment_method_id,
+        total_surcharge=data.total_surcharge,
+        status=data.status,
+    )

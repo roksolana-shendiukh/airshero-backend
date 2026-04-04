@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from app.models.route_model import Route
-
+    
 
 def get_all(db: Session, airline_id: int | None = None) -> list[Route]:
     query = (
@@ -42,60 +42,150 @@ def hub_has_valid_schedule(
     hub_city_id: int,
     to_city_id: int,
 ) -> bool:
+    dates = get_leg1_dates_with_connections(db, from_city_id, hub_city_id, to_city_id)
+    return len(dates) > 0
+
+
+def get_leg2_dates_with_suggestions(
+    db: Session,
+    from_city_id: int,
+    hub_city_id: int,
+    to_city_id: int,
+    leg1_date: str,
+) -> dict:
+    """
+    Для обраної дати leg1 знаходить:
+    - leg2_dates: дати рейсів hub→to_city в межах 24 годин після прильоту leg1
+    - suggested_leg1_dates: інші дати leg1 для яких є валідне з'єднання
+    """
     sql = text("""
-        SELECT TOP 1
-            f1.flight_id,
-            f1.departs_datetime AS leg1_departs,
-            f1.arrives_datetime AS leg1_arrives,
-            f2.flight_id        AS f2_id,
-            f2.departs_datetime AS leg2_departs,
+        SELECT
+            CAST(f1.departs_datetime AS DATE) AS leg1_date,
+            f1.arrives_datetime               AS leg1_arrives,
+            f2.departs_datetime               AS leg2_departs,
+            CAST(f2.departs_datetime AS DATE) AS leg2_date,
             DATEDIFF(HOUR, f1.arrives_datetime, f2.departs_datetime) AS transfer_hours
         FROM Flight f1
         JOIN FlightSchedule fs1 ON f1.flight_schedule_id = fs1.flight_schedule_id
         JOIN Route r1           ON fs1.route_id = r1.route_id
         JOIN Airport a_dep1     ON r1.departs_airport_id = a_dep1.airport_id
         JOIN Airport a_arr1     ON r1.arrives_airport_id = a_arr1.airport_id
-        JOIN City    c_dep1     ON a_dep1.city_id = c_dep1.city_id
-        JOIN City    c_hub      ON a_arr1.city_id = c_hub.city_id
 
         JOIN Flight f2          ON f2.flight_id != f1.flight_id
         JOIN FlightSchedule fs2 ON f2.flight_schedule_id = fs2.flight_schedule_id
         JOIN Route r2           ON fs2.route_id = r2.route_id
         JOIN Airport a_dep2     ON r2.departs_airport_id = a_dep2.airport_id
         JOIN Airport a_arr2     ON r2.arrives_airport_id = a_arr2.airport_id
-        JOIN City    c_arr2     ON a_arr2.city_id = c_arr2.city_id
+
+        JOIN FlightStatus fs1s  ON f1.flight_status_id = fs1s.flight_status_id
+        JOIN FlightStatus fs2s  ON f2.flight_status_id = fs2s.flight_status_id
 
         WHERE
-            c_dep1.city_id = :from_city
-            AND a_arr1.city_id = a_dep2.city_id
-            AND c_hub.city_id  = :hub_city
-            AND c_arr2.city_id = :to_city
-            AND (fs1.flight_end_date IS NULL OR fs1.flight_end_date >= GETDATE())
-            AND (fs2.flight_end_date IS NULL OR fs2.flight_end_date >= GETDATE())
+            a_dep1.city_id = :from_city
+            AND a_arr1.city_id = :hub_city
+            AND a_dep2.city_id = :hub_city
+            AND a_arr2.city_id = :to_city
+
+            AND fs1s.flight_status_name != 'Cancelled'
+            AND fs2s.flight_status_name != 'Cancelled'
+
             AND f1.departs_datetime >= GETDATE()
             AND f2.departs_datetime > f1.arrives_datetime
-            AND f2.departs_datetime <= DATEADD(HOUR, 48, f1.arrives_datetime)
+            AND f2.departs_datetime <= DATEADD(HOUR, 24, f1.arrives_datetime)
+
+            AND (fs1.flight_end_date IS NULL OR fs1.flight_end_date >= GETDATE())
+            AND (fs2.flight_end_date IS NULL OR fs2.flight_end_date >= GETDATE())
+
             AND CAST(f1.departs_datetime AS DATE) >= fs1.flight_start_date
             AND (fs1.flight_end_date IS NULL OR
                  CAST(f1.departs_datetime AS DATE) <= fs1.flight_end_date)
             AND CAST(f2.departs_datetime AS DATE) >= fs2.flight_start_date
             AND (fs2.flight_end_date IS NULL OR
                  CAST(f2.departs_datetime AS DATE) <= fs2.flight_end_date)
+
+        ORDER BY f1.departs_datetime, f2.departs_datetime
     """)
 
-    row = db.execute(sql, {
+    rows = db.execute(sql, {
         "from_city": from_city_id,
         "hub_city":  hub_city_id,
         "to_city":   to_city_id,
-    }).fetchone()
+    }).fetchall()
 
-    if row:
-        print(f"  hub={hub_city_id} VALID: leg1={row.leg1_departs}→{row.leg1_arrives}, leg2={row.leg2_departs}, transfer={row.transfer_hours}h")
-    else:
-        print(f"  hub={hub_city_id} INVALID: no valid pair found")
+    leg2_dates = set()
+    suggested_leg1_dates = set()
 
-    return row is not None
+    for row in rows:
+        row_leg1_date = row.leg1_date.strftime("%Y-%m-%d")
+        row_leg2_date = row.leg2_date.strftime("%Y-%m-%d")
+
+        if row_leg1_date == leg1_date:
+            leg2_dates.add(row_leg2_date)
+        else:
+            suggested_leg1_dates.add(row_leg1_date)
+
+    return {
+        "leg2_dates": sorted(leg2_dates),
+        "suggested_leg1_dates": sorted(suggested_leg1_dates),
+    }
 
 
+def get_leg1_dates_with_connections(
+    db: Session,
+    from_city_id: int,
+    hub_city_id: int,
+    to_city_id: int,
+) -> list[str]:
+    sql = text("""
+        SELECT DISTINCT
+            CAST(f1.departs_datetime AS DATE) AS leg1_date
+        FROM Flight f1
+        JOIN FlightSchedule fs1 ON f1.flight_schedule_id = fs1.flight_schedule_id
+        JOIN Route r1           ON fs1.route_id = r1.route_id
+        JOIN Airport a_dep1     ON r1.departs_airport_id = a_dep1.airport_id
+        JOIN Airport a_arr1     ON r1.arrives_airport_id = a_arr1.airport_id
+
+        JOIN Flight f2          ON f2.flight_id != f1.flight_id
+        JOIN FlightSchedule fs2 ON f2.flight_schedule_id = fs2.flight_schedule_id
+        JOIN Route r2           ON fs2.route_id = r2.route_id
+        JOIN Airport a_dep2     ON r2.departs_airport_id = a_dep2.airport_id
+        JOIN Airport a_arr2     ON r2.arrives_airport_id = a_arr2.airport_id
+
+        JOIN FlightStatus fs1s  ON f1.flight_status_id = fs1s.flight_status_id
+        JOIN FlightStatus fs2s  ON f2.flight_status_id = fs2s.flight_status_id
+
+        WHERE
+            a_dep1.city_id = :from_city
+            AND a_arr1.city_id = :hub_city
+            AND a_dep2.city_id = :hub_city
+            AND a_arr2.city_id = :to_city
+
+            AND fs1s.flight_status_name != 'Cancelled'
+            AND fs2s.flight_status_name != 'Cancelled'
+
+            AND f1.departs_datetime >= GETDATE()
+            AND f2.departs_datetime > f1.arrives_datetime
+            AND f2.departs_datetime <= DATEADD(HOUR, 24, f1.arrives_datetime)
+
+            AND (fs1.flight_end_date IS NULL OR fs1.flight_end_date >= GETDATE())
+            AND (fs2.flight_end_date IS NULL OR fs2.flight_end_date >= GETDATE())
+
+            AND CAST(f1.departs_datetime AS DATE) >= fs1.flight_start_date
+            AND (fs1.flight_end_date IS NULL OR
+                 CAST(f1.departs_datetime AS DATE) <= fs1.flight_end_date)
+            AND CAST(f2.departs_datetime AS DATE) >= fs2.flight_start_date
+            AND (fs2.flight_end_date IS NULL OR
+                 CAST(f2.departs_datetime AS DATE) <= fs2.flight_end_date)
+
+        ORDER BY leg1_date
+    """)
+
+    rows = db.execute(sql, {
+        "from_city": from_city_id,
+        "hub_city":  hub_city_id,
+        "to_city":   to_city_id,
+    }).fetchall()
+
+    return [row.leg1_date.strftime("%Y-%m-%d") for row in rows]
 
 

@@ -266,6 +266,7 @@ def get_or_create_document_id(db: Session, p_data) -> int:
         first_name=p_data.first_name,
         last_name=p_data.last_name,
         sex=p_data.sex,
+        email=p_data.email,
         date_of_birth=_parse_date(p_data.date_of_birth),
         citizenship_id=p_data.citizenship_id,
         document_type_id=p_data.document_type_id,

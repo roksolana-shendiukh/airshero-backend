@@ -36,5 +36,18 @@ def get_available_dates(db: Session, from_city_id: int, to_city_id: int) -> list
     print(f"After set: {dates}")
     return dates
 
+def get_leg2_dates_with_suggestions(
+    db: Session,
+    from_city_id: int,
+    hub_city_id: int,
+    to_city_id: int,
+    leg1_date: str,
+) -> dict:
+    from app.repositories import route_repository
+    return route_repository.get_leg2_dates_with_suggestions(
+        db, from_city_id, hub_city_id, to_city_id, leg1_date
+    )
+
+
 
 
