@@ -21,7 +21,6 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
     def to_time_str(t):
         if t is None:
             return None
-        print(f"[to_time_str] type={type(t)}, value={t}")
         if hasattr(t, 'strftime'):
             return t.strftime('%H:%M:%S')
         return str(t)

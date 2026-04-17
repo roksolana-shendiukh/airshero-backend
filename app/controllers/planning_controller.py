@@ -4,10 +4,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import require_role
 from app.services import planning_service
-from app.schemas.planning_schema import CreateFlightDTO, AddFlightBaggageDTO
+from app.schemas.planning_schema import (
+    CreateFlightDTO,
+    AddFlightBaggageDTO,
+    CreateRouteDTO,
+    CreateScheduleDTO,
+)
 
 router = APIRouter(prefix="/planning", tags=["Planning"])
-
 
 @router.get("/overview/flights")
 def get_overview_flights(
@@ -16,16 +20,20 @@ def get_overview_flights(
     month: int | None = Query(default=None),
     year: int | None = Query(default=None),
     status: str | None = Query(default=None),
+    flight_number: str | None = Query(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_role("planningManager")),
 ):
+    print(f"DEBUG flight_number: {flight_number}")
     airline_id = user.get("airlineId")
+    print(f"DEBUG airline_id: {airline_id}, flight_number: {flight_number}")  # тут
+    
     if not airline_id:
         raise HTTPException(status_code=403, detail="No airline assigned")
     return planning_service.get_overview_flights(
-        db, airline_id, mode=mode, date=date, month=month, year=year, status=status
+        db, airline_id, mode=mode, date=date, month=month, year=year,
+        status=status, flight_number=flight_number
     )
-
 
 @router.get("/overview/stats")
 def get_overview_stats(
@@ -37,6 +45,18 @@ def get_overview_stats(
         raise HTTPException(status_code=403, detail="No airline assigned to this user")
     return planning_service.get_overview_stats(db, airline_id)
 
+
+@router.get("/routes/flight-numbers")
+def get_all_flight_numbers(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned")
+    return planning_service.get_all_flight_numbers(db, airline_id)
+
+
 @router.get("/overview/available-dates")
 def get_available_dates(
     db: Session = Depends(get_db),
@@ -46,6 +66,7 @@ def get_available_dates(
     if not airline_id:
         raise HTTPException(status_code=403, detail="No airline assigned")
     return planning_service.get_available_dates(db, airline_id)
+
 
 @router.get("/overview/available-months")
 def get_available_months(
@@ -58,6 +79,28 @@ def get_available_months(
     return planning_service.get_available_months(db, airline_id)
 
 
+@router.get("/airfleets")
+def get_airfleets(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned")
+    return planning_service.get_airfleets_for_airline(db, airline_id)
+
+
+@router.get("/airports")
+def get_airports(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned")
+    return planning_service.get_airports_for_airline(db, airline_id)
+
+
 @router.get("/routes")
 def get_routes(
     db: Session = Depends(get_db),
@@ -67,6 +110,74 @@ def get_routes(
     if not airline_id:
         raise HTTPException(status_code=403, detail="No airline assigned")
     return planning_service.get_routes_for_airline(db, airline_id)
+
+
+@router.post("/routes")
+def create_route(
+    body: CreateRouteDTO,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned")
+    try:
+        return planning_service.create_route_with_schedule(
+            db,
+            airline_id=airline_id,
+            airfleet_id=body.airfleetId,
+            departs_airport_id=body.departsAirportId,
+            arrives_airport_id=body.arrivesAirportId,
+            flight_number=body.flightNumber,
+            flight_start_date=body.flightStartDate,
+            flight_end_date=body.flightEndDate,
+            schedule_groups=[
+                {
+                    "day_ids": g.dayIds,
+                    "departure_time": g.departureTime,
+                    "arrival_time": g.arrivalTime,
+                }
+                for g in body.scheduleGroups
+            ],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/routes/{route_id}/schedules")
+def add_schedule(
+    route_id: int,
+    body: CreateScheduleDTO,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    try:
+        return planning_service.add_schedule_to_route(
+            db,
+            route_id=route_id,
+            flight_start_date=body.flightStartDate,
+            flight_end_date=body.flightEndDate,
+            schedule_groups=[
+                {
+                    "day_ids": g.dayIds,
+                    "departure_time": g.departureTime,
+                    "arrival_time": g.arrivalTime,
+                }
+                for g in body.scheduleGroups
+            ],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/routes/{route_id}/schedules")
+def get_route_schedules(
+    route_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    return planning_service.get_route_schedules(db, route_id)
+
 
 @router.post("/flights")
 def create_flight(
@@ -86,7 +197,7 @@ def create_flight(
 @router.get("/baggage-rules")
 def get_baggage_rules(
     db: Session = Depends(get_db),
-    user=Depends(require_role("planningManager"))
+    user=Depends(require_role("planningManager")),
 ):
     return planning_service.get_baggage_rules(db)
 
@@ -96,31 +207,17 @@ def add_baggage_to_flight(
     flight_id: int,
     body: AddFlightBaggageDTO,
     db: Session = Depends(get_db),
-    user=Depends(require_role("planningManager"))
+    user=Depends(require_role("planningManager")),
 ):
-    options =[
+    options = [
         {
             "class_id": opt.classId,
             "baggage_pricing_rule_id": opt.baggagePricingRuleId,
-            "price": opt.price
+            "price": opt.price,
         }
         for opt in body.baggageOptions
     ]
-    
     return planning_service.add_baggage_to_flight(db, flight_id, options)
-
-
-@router.get("/seat-layout/{airfleet_id}")
-def get_seat_layout_endpoint(airfleet_id: int, db: Session = Depends(get_db)):
-    return planning_service.get_seat_layout(db, airfleet_id)
-
-@router.get("/routes/{route_id}/schedules")
-def get_route_schedules(
-    route_id: int,
-    db: Session = Depends(get_db),
-    user=Depends(require_role("planningManager")),
-):
-    return planning_service.get_route_schedules(db, route_id)
 
 
 @router.get("/airfleet/{airfleet_id}/seat-layout")
@@ -141,9 +238,17 @@ def get_booked_dates(
     return planning_service.get_booked_dates_for_schedule(db, flight_schedule_id)
 
 
-
-
-
-
+@router.get("/routes/generate-flight-number")
+def generate_flight_number(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    if not airline_id:
+        raise HTTPException(status_code=403, detail="No airline assigned")
+    try:
+        return planning_service.generate_flight_number(db, airline_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 

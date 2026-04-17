@@ -39,6 +39,8 @@ def _get_route_info(db: Session, flight_id: int) -> tuple[int | None, str]:
     airport_id  = getattr(dep_airport, 'airport_id', None)
     range_km    = float(getattr(route, 'flight_range', 0) or 0)
 
+    print(f"[gate_service] flight_id={flight_id}, airport_id={airport_id}, dep_country={dep_country}, arr_country={arr_country}, range_km={range_km}")
+
     if dep_country == arr_country:
         return airport_id, 'domestic'
     elif range_km <= 4000:

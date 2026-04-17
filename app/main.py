@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from apscheduler.schedulers.background import BackgroundScheduler
+from app.services.system_service import record_snapshot
+from contextlib import asynccontextmanager
+
+
 
 from app.database import engine
 from app.controllers import (
@@ -20,10 +25,21 @@ from app.controllers import (
     airfleet_controller,
     flight_crew_controller,
     planning_controller,
-    airline_controller
+    airline_controller,
+    analytics_controller
 )
 
-app = FastAPI()
+scheduler = BackgroundScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    record_snapshot()  
+    scheduler.add_job(record_snapshot, 'interval', minutes=5)
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,6 +66,7 @@ app.include_router(airfleet_controller.router)
 app.include_router(flight_crew_controller.router)
 app.include_router(planning_controller.router)
 app.include_router(airline_controller.router)
+app.include_router(analytics_controller.router)
 
 
 @app.on_event("startup")

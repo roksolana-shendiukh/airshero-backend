@@ -64,7 +64,7 @@ def get_seat_map(db: Session, flight_operation_id: int) -> dict | None:
     }
 
 
-def get_active_flights_for_agent(db: Session, airport_id: int) -> list:
+def get_active_flights_for_agent(db: Session, airport_id: int, airline_id: int | None = None) -> list:
     sql = text("""
         SELECT
             fo.flight_operation_id,
@@ -72,44 +72,55 @@ def get_active_flights_for_agent(db: Session, airport_id: int) -> list:
             r.flight_number,
             f.departs_datetime,
             f.arrives_datetime,
+            c_dep.country_id AS departs_country_id,
+            c_arr.country_id AS arrives_country_id,
             ap_dep.airport_code  AS departs_airport_code,
             ap_dep.airport_name  AS departs_airport_name,
             ap_arr.airport_code  AS arrives_airport_code,
             ap_arr.airport_name  AS arrives_airport_name,
-            fos.flight_operation_status_name AS status,
-            g.gate_code,
+            ISNULL(fos.flight_operation_status_name, 'Scheduled') AS status,
+            ISNULL(g.gate_code, '—') AS gate_code,
             fo.boarding_start_time,
             fo.boarding_end_time
-        FROM FlightOperation fo
-        JOIN Flight f              ON f.flight_id              = fo.flight_id
+        FROM Flight f
         JOIN FlightSchedule fs     ON fs.flight_schedule_id    = f.flight_schedule_id
         JOIN Route r               ON r.route_id               = fs.route_id
         JOIN Airport ap_dep        ON ap_dep.airport_id        = r.departs_airport_id
         JOIN Airport ap_arr        ON ap_arr.airport_id        = r.arrives_airport_id
-        JOIN FlightOperationStatus fos ON fos.flight_operation_status_id = fo.flight_operation_status_id
-        JOIN Gate g                ON g.gate_id                = fo.gate_id
-        JOIN Terminal t            ON t.terminal_id            = g.terminal_id
+        JOIN City c_dep            ON c_dep.city_id            = ap_dep.city_id
+        JOIN City c_arr            ON c_arr.city_id            = ap_arr.city_id
+        LEFT JOIN FlightOperation fo ON fo.flight_id = f.flight_id
+        LEFT JOIN FlightOperationStatus fos ON fos.flight_operation_status_id = fo.flight_operation_status_id
+        LEFT JOIN Gate g           ON g.gate_id = fo.gate_id
+        LEFT JOIN Terminal t       ON t.terminal_id = g.terminal_id
         WHERE ap_dep.airport_id = :airport_id
-            AND fos.flight_operation_status_name IN ('Boarding', 'Scheduled', 'Delayed')
+            AND f.departs_datetime >= GETDATE()
+            AND f.departs_datetime <= DATEADD(hour, 12, GETDATE())
+            AND (
+                fos.flight_operation_status_name IN ('Waiting', 'Boarding')
+                OR fo.flight_operation_id IS NULL
+            )
         ORDER BY f.departs_datetime
     """)
 
-    rows = db.execute(sql, {"airport_id": airport_id}).mappings().all()
-
+    rows = db.execute(sql, {"airport_id": airport_id, "airline_id": airline_id}).mappings().all()
+    print(f">>> active flights rows: {len(rows)}")
     return [
         {
-            "flightOperationId": r["flight_operation_id"],
-            "flightId":          r["flight_id"],
-            "flightNumber":      r["flight_number"],
-            "departsDatetime":   str(r["departs_datetime"]),
-            "arrivesDatetime":   str(r["arrives_datetime"]),
-            "departsAirport":    r["departs_airport_code"],
-            "arrivesAirport":    r["arrives_airport_code"],
+            "flightOperationId":  r["flight_operation_id"],
+            "flightId":           r["flight_id"],
+            "flightNumber":       r["flight_number"],
+            "departsDatetime":    str(r["departs_datetime"]),
+            "arrivesDatetime":    str(r["arrives_datetime"]),
+            "departsCountryId":   r["departs_country_id"],
+            "arrivesCountryId":   r["arrives_country_id"],
+            "departsAirport":     r["departs_airport_code"],
+            "arrivesAirport":     r["arrives_airport_code"],
             "arrivesAirportName": r["arrives_airport_name"],
-            "status":            r["status"],
-            "gateCode":          r["gate_code"],
-            "boardingStartTime": str(r["boarding_start_time"]) if r["boarding_start_time"] else None,
-            "boardingEndTime":   str(r["boarding_end_time"])   if r["boarding_end_time"]   else None,
+            "status":             r["status"],
+            "gateCode":           r["gate_code"],
+            "boardingStartTime":  str(r["boarding_start_time"]) if r["boarding_start_time"] else None,
+            "boardingEndTime":    str(r["boarding_end_time"])   if r["boarding_end_time"]   else None,
         }
         for r in rows
     ]
@@ -134,18 +145,36 @@ def get_suggestions_for_flight(db: Session, q: str, flight_num: str, departs_dat
         FROM [PassengerDocument] pd
         JOIN [Passenger] p ON p.[passenger_id] = pd.[passenger_id]
         JOIN [BookingItem] bi ON bi.[passenger_document_id] = pd.[passenger_document_id]
+        JOIN [Booking] b ON b.[booking_id] = bi.[booking_id]
+        JOIN [BookingStatus] bs ON bs.[booking_status_id] = b.[booking_status_id]
         JOIN [FlightPrice] fp ON fp.[flight_price_id] = bi.[flight_price_id]
         JOIN [FlightClass] fc ON fc.[flight_class_id] = fp.[flight_class_id]
         JOIN [Flight] f ON f.[flight_id] = fc.[flight_id]
         JOIN [FlightSchedule] fs ON fs.[flight_schedule_id] = f.[flight_schedule_id]
         JOIN [Route] r ON r.[route_id] = fs.[route_id]
-        WHERE pd.[document_number] LIKE '%' + :q + '%'
-          AND r.[flight_number] = :flight_num
-          AND CAST(f.[departs_datetime] AS DATE) = :departs_date
+        LEFT JOIN [BoardingPass] bp ON bp.[booking_item_id] = bi.[booking_item_id]
+            AND bp.[flight_operation_id] = (
+                SELECT TOP 1 fo.flight_operation_id 
+                FROM FlightOperation fo
+                JOIN Flight f2 ON f2.flight_id = fo.flight_id
+                JOIN FlightSchedule fs2 ON fs2.flight_schedule_id = f2.flight_schedule_id
+                JOIN Route r2 ON r2.route_id = fs2.route_id
+                WHERE r2.flight_number = :flight_num
+                AND CAST(f2.departs_datetime AS DATE) = :departs_date
+                AND fo.flight_operation_status_id NOT IN (
+                    SELECT flight_operation_status_id FROM FlightOperationStatus 
+                    WHERE flight_operation_status_name IN ('Cancelled', 'Completed')
+                )
+            )
+        WHERE pd.[document_number] LIKE :q + '%'
+        AND r.[flight_number] = :flight_num
+        AND CAST(f.[departs_datetime] AS DATE) = :departs_date
+        AND bs.[booking_status_name] = 'Confirmed'
+        AND bp.[boarding_pass_id] IS NULL
     """)
     
     result = db.execute(sql, {
-        "q": f"{q}%", 
+        "q": q, 
         "flight_num": flight_num, 
         "departs_date": departs_date
     })
@@ -189,6 +218,7 @@ def get_baggage_types(db: Session) -> list:
     sql = text("""
         SELECT baggage_type_id, baggage_type_name
         FROM BaggageType
+        WHERE baggage_type_name != 'Carry-on baggage'
         ORDER BY baggage_type_id
     """)
     rows = db.execute(sql).mappings().all()
@@ -199,7 +229,6 @@ def get_baggage_types(db: Session) -> list:
         }
         for r in rows
     ]
-
 
 def get_checked_baggage_weight(db: Session, flight_operation_id: int):
     weight_sql = text("""
@@ -301,8 +330,12 @@ def issue_boarding_pass_with_baggage(
         SELECT boarding_pass_id, boarding_pass_ticket_number
         FROM BoardingPass
         WHERE booking_item_id = :booking_item_id
+        AND flight_operation_id = :flight_operation_id
     """)
-    existing = db.execute(existing_sql, {"booking_item_id": booking_item_id}).mappings().first()
+    existing = db.execute(existing_sql, {
+        "booking_item_id": booking_item_id,
+        "flight_operation_id": flight_operation_id,
+    }).mappings().first()
     if existing:
         raise ValueError(f"Passenger already checked in. Boarding pass: {existing['boarding_pass_ticket_number']}")
 
@@ -396,11 +429,153 @@ def get_checkin_agent_by_user_id(db: Session, agent_id: int):
     """)
     return db.execute(sql, {"agent_id": agent_id}).mappings().first()
 
-def check_already_checked_in(db: Session, booking_item_id: int) -> dict | None:
+
+def check_already_checked_in(db: Session, booking_item_id: int, flight_operation_id: int) -> dict | None:
     sql = text("""
         SELECT bp.boarding_pass_id, bp.boarding_pass_ticket_number
         FROM BoardingPass bp
         WHERE bp.booking_item_id = :booking_item_id
+        AND bp.flight_operation_id = :flight_operation_id
     """)
-    row = db.execute(sql, {"booking_item_id": booking_item_id}).mappings().first()
+    row = db.execute(sql, {
+        "booking_item_id": booking_item_id,
+        "flight_operation_id": flight_operation_id,
+    }).mappings().first()
     return dict(row) if row else None
+
+
+def get_boarding_stats(db: Session, flight_operation_id: int) -> dict:
+    sql = text("""
+        SELECT
+            COUNT(DISTINCT bi.booking_item_id) AS total_passengers,
+            COUNT(DISTINCT bp.boarding_pass_id) AS checked_in
+        FROM FlightClass fc
+        JOIN FlightPrice fp ON fp.flight_class_id = fc.flight_class_id
+        JOIN BookingItem bi ON bi.flight_price_id = fp.flight_price_id
+        JOIN Booking b ON b.booking_id = bi.booking_id
+        JOIN BookingStatus bs ON bs.booking_status_id = b.booking_status_id
+        LEFT JOIN BoardingPass bp ON bp.booking_item_id = bi.booking_item_id
+            AND bp.flight_operation_id = :flight_operation_id
+        WHERE fc.flight_id = (
+            SELECT flight_id FROM FlightOperation
+            WHERE flight_operation_id = :flight_operation_id
+        )
+        AND bs.booking_status_name = 'Confirmed'
+    """)
+    row = db.execute(sql, {"flight_operation_id": flight_operation_id}).mappings().first()
+    total      = row["total_passengers"] if row else 0
+    checked_in = row["checked_in"]       if row else 0
+    return {
+        "totalPassengers": total,
+        "checkedIn":       checked_in,
+        "remaining":       total - checked_in,
+    }
+
+
+def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
+    sql = text("""
+        SELECT 
+            bp.boarding_pass_id,
+            bp.boarding_pass_ticket_number,
+            p.passenger_first_name,
+            p.passenger_last_name,
+            CAST(sl.seat_layout_rows AS VARCHAR) + sl.seat_layout_columns AS seat_position,
+            c.class_name,
+            bp.boarding_pass_issue_date_time,
+            COUNT(bu.baggage_unit_id) AS bag_count
+        FROM BoardingPass bp
+        JOIN BookingItem bi ON bi.booking_item_id = bp.booking_item_id
+        JOIN PassengerDocument pd ON pd.passenger_document_id = bi.passenger_document_id
+        JOIN Passenger p ON p.passenger_id = pd.passenger_id
+        JOIN SeatLayout sl ON sl.seat_layout_id = bp.seat_layout_id
+        JOIN FlightPrice fp ON fp.flight_price_id = bi.flight_price_id
+        JOIN FlightClass fc ON fc.flight_class_id = fp.flight_class_id
+        JOIN Class c ON c.class_id = fc.class_id
+        LEFT JOIN BaggageUnit bu ON bu.boarding_pass_id = bp.boarding_pass_id
+        WHERE bp.flight_operation_id = :flight_operation_id
+        GROUP BY
+            bp.boarding_pass_id,
+            bp.boarding_pass_ticket_number,
+            p.passenger_first_name,
+            p.passenger_last_name,
+            sl.seat_layout_rows,
+            sl.seat_layout_columns,
+            c.class_name,
+            bp.boarding_pass_issue_date_time
+        ORDER BY bp.boarding_pass_issue_date_time DESC
+    """)
+    rows = db.execute(sql, {
+        "flight_operation_id": flight_operation_id,
+    }).mappings().all()
+    return [
+        {
+            "boardingPassId":    r["boarding_pass_id"],
+            "ticketNumber":      r["boarding_pass_ticket_number"],
+            "passengerName":     f"{r['passenger_first_name']} {r['passenger_last_name']}",
+            "seat":              r["seat_position"],
+            "className":         r["class_name"],
+            "issuedAt":          str(r["boarding_pass_issue_date_time"]),
+            "bagCount":          r["bag_count"],
+        }
+        for r in rows
+    ]
+
+
+def get_boarding_pass_details(db: Session, boarding_pass_id: int) -> dict | None:
+    sql = text("""
+        SELECT
+            bp.boarding_pass_ticket_number,
+            p.passenger_first_name,
+            p.passenger_last_name,
+            r.flight_number,
+            c.class_name,
+            CAST(sl.seat_layout_rows AS VARCHAR) + sl.seat_layout_columns AS seat_position,
+            f.departs_datetime,
+            f.arrives_datetime,
+            ap_dep.airport_code AS departs_airport,
+            ap_arr.airport_code AS arrives_airport,
+            g.gate_code,
+            COUNT(bu.baggage_unit_id) AS bag_count
+        FROM BoardingPass bp
+        JOIN BookingItem bi ON bi.booking_item_id = bp.booking_item_id
+        JOIN PassengerDocument pd ON pd.passenger_document_id = bi.passenger_document_id
+        JOIN Passenger p ON p.passenger_id = pd.passenger_id
+        JOIN SeatLayout sl ON sl.seat_layout_id = bp.seat_layout_id
+        JOIN FlightPrice fp ON fp.flight_price_id = bi.flight_price_id
+        JOIN FlightClass fc ON fc.flight_class_id = fp.flight_class_id
+        JOIN Class c ON c.class_id = fc.class_id
+        JOIN FlightOperation fo ON fo.flight_operation_id = bp.flight_operation_id
+        JOIN Flight f ON f.flight_id = fo.flight_id
+        JOIN FlightSchedule fs ON fs.flight_schedule_id = f.flight_schedule_id
+        JOIN Route r ON r.route_id = fs.route_id
+        JOIN Airport ap_dep ON ap_dep.airport_id = r.departs_airport_id
+        JOIN Airport ap_arr ON ap_arr.airport_id = r.arrives_airport_id
+        JOIN Gate g ON g.gate_id = fo.gate_id
+        LEFT JOIN BaggageUnit bu ON bu.boarding_pass_id = bp.boarding_pass_id
+        WHERE bp.boarding_pass_id = :boarding_pass_id
+        GROUP BY
+            bp.boarding_pass_ticket_number,
+            p.passenger_first_name, p.passenger_last_name,
+            r.flight_number, c.class_name,
+            sl.seat_layout_rows, sl.seat_layout_columns,
+            f.departs_datetime, f.arrives_datetime,
+            ap_dep.airport_code, ap_arr.airport_code,
+            g.gate_code
+    """)
+    row = db.execute(sql, {"boarding_pass_id": boarding_pass_id}).mappings().first()
+    if not row:
+        return None
+    return {
+        "ticketNumber":   row["boarding_pass_ticket_number"],
+        "passengerName":  f"{row['passenger_first_name']} {row['passenger_last_name']}",
+        "flightNumber":   row["flight_number"],
+        "flightClass":    row["class_name"],
+        "seat":           row["seat_position"],
+        "departsTime":    str(row["departs_datetime"]),
+        "arrivesTime":    str(row["arrives_datetime"]),
+        "departsAirport": row["departs_airport"],
+        "arrivesAirport": row["arrives_airport"],
+        "gate":           row["gate_code"],
+        "bagCount":       row["bag_count"],
+    }
+

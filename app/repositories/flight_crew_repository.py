@@ -71,8 +71,8 @@ def get_available_crew(
             .first()
         )
         if flight:
-            schedule = getattr(flight, 'flight_schedule', None)
-            route    = getattr(schedule, 'route', None)
+            schedule           = getattr(flight, 'flight_schedule', None)
+            route              = getattr(schedule, 'route', None)
             departs_airport_id = getattr(route, 'departs_airport_id', None)
 
     assigned_ids = {
@@ -97,25 +97,22 @@ def get_available_crew(
     if not certified_ids:
         return []
 
-    busy_ids: set[int] = set()
-    if (current_op and
-            current_op.actual_departure_date_time and
-            current_op.actual_arrival_date_time):
-        dep = current_op.actual_departure_date_time
-        arr = current_op.actual_arrival_date_time
-        conflicts = (
-            db.query(FlightCrewFlightOperation.flight_crew_id)
-            .join(FlightOperation,
-                  FlightOperation.flight_operation_id ==
-                  FlightCrewFlightOperation.flight_operation_id)
-            .filter(
-                FlightCrewFlightOperation.flight_operation_id != operation_id,
-                FlightOperation.actual_departure_date_time < arr,
-                FlightOperation.actual_arrival_date_time > dep,
-            )
-            .all()
+    active_statuses = {'Waiting', 'Boarding', 'Baggage Loading', 'Departed', 'Arrived'}
+    conflicts = (
+        db.query(FlightCrewFlightOperation.flight_crew_id)
+        .join(FlightOperation,
+              FlightOperation.flight_operation_id ==
+              FlightCrewFlightOperation.flight_operation_id)
+        .join(FlightOperationStatus,
+              FlightOperationStatus.flight_operation_status_id ==
+              FlightOperation.flight_operation_status_id)
+        .filter(
+            FlightCrewFlightOperation.flight_operation_id != operation_id,
+            FlightOperationStatus.flight_operation_status_name.in_(active_statuses),
         )
-        busy_ids = {r.flight_crew_id for r in conflicts}
+        .all()
+    )
+    busy_ids = {r.flight_crew_id for r in conflicts}
 
     available_ids = certified_ids - assigned_ids - busy_ids
     if not available_ids:
@@ -144,16 +141,14 @@ def get_available_crew(
     result: list[tuple[FlightCrew, bool]] = []
     for c in crew_list:
         current_airport = _get_crew_current_airport(db, c.flight_crew_id)
-
         if current_airport is None:
-           result.append((c, False))
+            result.append((c, False))
         elif departs_airport_id and current_airport != departs_airport_id:
             continue
         else:
             result.append((c, True))
 
     return result
-
 
 def assign_crew_member(
     db: Session, operation_id: int, crew_id: int

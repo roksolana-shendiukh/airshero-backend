@@ -112,59 +112,42 @@ def filter_flights_by_ids(
     result = db.execute(sql, params)
     return result.mappings().all()
 
-def get_flights_without_operation(db: Session, airline_id: int):
-    sql = text("""
-        SELECT
-            f.flight_id,
-            r.flight_number,
-            dep_air.airport_id  AS departs_airport_id,
-            dep_air.airport_code AS departs_code,
-            arr_air.airport_code AS arrives_code,
-            f.departs_datetime,
-            f.arrives_datetime,
-            fs.flight_status_name
-        FROM Flight f
-        INNER JOIN FlightSchedule fsched ON f.flight_schedule_id = fsched.flight_schedule_id
-        INNER JOIN Route r ON fsched.route_id = r.route_id
-        INNER JOIN Airline al ON r.airline_id = al.airline_id
-        INNER JOIN Airport dep_air ON r.departs_airport_id = dep_air.airport_id
-        INNER JOIN Airport arr_air ON r.arrives_airport_id = arr_air.airport_id
-        INNER JOIN FlightStatus fs ON f.flight_status_id = fs.flight_status_id
-        LEFT JOIN FlightOperation fo ON f.flight_id = fo.flight_id
-        WHERE fo.flight_id IS NULL
-          AND al.airline_id = :airline_id
-          AND f.departs_datetime > GETDATE()
-          AND fs.flight_status_name = 'Scheduled'
-        ORDER BY f.departs_datetime ASC
-    """)
-    result = db.execute(sql, {"airline_id": airline_id})
-    return result.mappings().all()
 
 def get_flights_without_operation(db: Session, airline_id: int):
     sql = text("""
-        SELECT
-            f.flight_id,
-            r.flight_number,
-            dep_air.airport_id   AS departs_airport_id,
-            dep_air.airport_code AS departs_code,
-            arr_air.airport_code AS arrives_code,
-            f.departs_datetime,
-            f.arrives_datetime,
-            fs.flight_status_name
-        FROM Flight f
-        INNER JOIN FlightSchedule fsched ON f.flight_schedule_id = fsched.flight_schedule_id
-        INNER JOIN Route r ON fsched.route_id = r.route_id
-        INNER JOIN Airline al ON r.airline_id = al.airline_id
-        INNER JOIN Airport dep_air ON r.departs_airport_id = dep_air.airport_id
-        INNER JOIN Airport arr_air ON r.arrives_airport_id = arr_air.airport_id
-        INNER JOIN FlightStatus fs ON f.flight_status_id = fs.flight_status_id
-        LEFT JOIN FlightOperation fo ON f.flight_id = fo.flight_id
-        WHERE fo.flight_id IS NULL
-          AND al.airline_id = :airline_id
-          AND f.departs_datetime > GETDATE()
-          AND fs.flight_status_name = 'Scheduled'
-        ORDER BY f.departs_datetime ASC
+    SELECT
+        f.flight_id,
+        r.flight_number,
+        dep_air.airport_id   AS departs_airport_id,
+        dep_air.airport_code AS departs_code,
+        arr_air.airport_code AS arrives_code,
+        f.departs_datetime,
+        f.arrives_datetime,
+        fs.flight_status_name,
+        al.airline_name AS airline_name
+    FROM Flight f
+    INNER JOIN FlightSchedule fsched ON f.flight_schedule_id = fsched.flight_schedule_id
+    INNER JOIN Route r ON fsched.route_id = r.route_id
+    INNER JOIN Airline al ON r.airline_id = al.airline_id
+    INNER JOIN Airport dep_air ON r.departs_airport_id = dep_air.airport_id
+    INNER JOIN Airport arr_air ON r.arrives_airport_id = arr_air.airport_id
+    INNER JOIN FlightStatus fs ON f.flight_status_id = fs.flight_status_id
+    LEFT JOIN FlightOperation fo ON f.flight_id = fo.flight_id
+        AND fo.flight_operation_status_id NOT IN (
+            SELECT flight_operation_status_id 
+            FROM FlightOperationStatus 
+            WHERE flight_operation_status_name IN ('Completed', 'Cancelled')
+        )
+    WHERE fo.flight_id IS NULL
+      AND al.airline_id = :airline_id
+      AND f.departs_datetime > GETDATE()
+      AND f.departs_datetime <= DATEADD(HOUR, 12, GETDATE())
+      AND fs.flight_status_name = 'Scheduled'
+    ORDER BY f.departs_datetime ASC
     """)
-    result = db.execute(sql, {"airline_id": airline_id})
-    return result.mappings().all()
+
+    print(f">>> get_flights_without_operation airline_id={airline_id}")
+    rows = db.execute(sql, {"airline_id": airline_id}).mappings().all()
+    print(f">>> rows count: {len(rows)}")
+    return rows
 

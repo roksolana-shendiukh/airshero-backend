@@ -130,7 +130,39 @@ def issue_with_baggage(
 @router.get("/check-already-checked-in/{booking_item_id}")
 def check_already_checked_in(
     booking_item_id: int,
+    flight_operation_id: int,
     db: Session = Depends(get_db),
     user=Depends(require_role("checkInAgent")),
 ):
-    return checkin_service.check_already_checked_in(db, booking_item_id)
+    return checkin_service.check_already_checked_in(db, booking_item_id, flight_operation_id)
+
+
+@router.get("/stats/{flight_operation_id}")
+def get_boarding_stats(
+    flight_operation_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    return checkin_service.get_boarding_stats(db, flight_operation_id)
+
+
+@router.get("/recent/{flight_operation_id}")
+def get_recently_checked_in(
+    flight_operation_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    return checkin_service.get_recently_checked_in(db, flight_operation_id)
+
+@router.get("/boarding-pass/{boarding_pass_id}")
+def get_boarding_pass(
+    boarding_pass_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    result = checkin_service.get_boarding_pass_details(db, boarding_pass_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Boarding pass not found")
+    return result
+
+

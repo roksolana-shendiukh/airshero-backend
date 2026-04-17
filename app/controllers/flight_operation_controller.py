@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, time as time_type
 
 from app.database import get_db
-from app.dependencies.auth import require_role
+from app.dependencies.auth import require_role, require_any_role
 from app.schemas.flight_operation_schema import FlightOperationCreateDTO, FlightOperationUpdateDTO, OperationStateRequestDTO
 from app.services import flight_operation_service, gate_service, flight_crew_service
 from app.models.flight_operation_model import FlightOperationStatus
@@ -25,8 +25,8 @@ _TIMELINE_FIELDS = {
 _STEP_TO_STATUS = {
     "boarding-start":  "Boarding",
     "boarding-end":    "Boarding",
-    "baggage-start":   "Boarding",
-    "baggage-end":     "Boarding",
+    "baggage-start":   "Baggage Loading",
+    "baggage-end":     "Baggage Loading",
     "departure":       "Departed",
     "arrival":         "Arrived",
 }
@@ -121,7 +121,7 @@ def set_timeline_step(
     operation_id: int,
     step: str,
     db: Session = Depends(get_db),
-    user=Depends(require_role("flightOperator")),
+    user=Depends(require_any_role("flightOperator", "checkInAgent")),
 ):
     if step not in _TIMELINE_FIELDS:
         raise HTTPException(status_code=400, detail=f"Unknown step '{step}'")
@@ -141,17 +141,6 @@ def set_timeline_step(
             raise HTTPException(
                 status_code=422,
                 detail=f"Crew is not complete. Missing: {missing_str}"
-            )
-
-    if step == "boarding-end" and op.boarding_start_time:
-        start = op.boarding_start_time
-        if isinstance(start, time_type):
-            start = datetime.combine(now.date(), start)
-        diff = (now - start).total_seconds() / 60
-        if diff < _MIN_BOARDING_MINUTES:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Boarding duration is only {int(diff)} min. Minimum is {_MIN_BOARDING_MINUTES} min. Are you sure?"
             )
 
     if step == "baggage-end" and op.baggage_loading_start_time:
@@ -305,3 +294,8 @@ def complete_operation(
     if not op:
         raise HTTPException(status_code=404, detail="Flight operation not found")
     return op
+
+
+
+
+
