@@ -57,6 +57,7 @@ class CalculateBaggageRequestDTO(BaseModel):
 
 class BagDetail(BaseModel):
     weight: float
+    determinedTypeId: int = 0
     determinedTypeName: str
     determinedDimensions: str
     isPreBookedSlot: bool

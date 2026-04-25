@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import require_role
 from app.services import flight_crew_service
+from app.models.flight_operation_model import FlightOperation
 
 router = APIRouter(prefix="/flight-operations", tags=["Flight Crew"])
 
@@ -25,6 +26,7 @@ def get_crew(
 @router.get("/{operation_id}/crew/available")
 def get_available_crew(
     operation_id: int,
+    position: str | None = Query(default='Pilot'),
     search: str | None = Query(default=None),
     db: Session = Depends(get_db),
     user=Depends(require_role("flightOperator")),
@@ -32,8 +34,19 @@ def get_available_crew(
     airline_id = user.get("airlineId")
     if not airline_id:
         raise HTTPException(status_code=403, detail="airlineId not found in token")
+
+    op = db.query(FlightOperation).filter(
+        FlightOperation.flight_operation_id == operation_id
+    ).first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Operation not found")
+
     return flight_crew_service.get_available_crew(
-        db, operation_id, airline_id, search=search
+        db,
+        operation_id=operation_id,
+        airline_id=airline_id,
+        search=search,
+        position=position,
     )
 
 

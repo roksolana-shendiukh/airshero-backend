@@ -42,11 +42,11 @@ def _get_route_info(db: Session, flight_id: int) -> tuple[int | None, str]:
     print(f"[gate_service] flight_id={flight_id}, airport_id={airport_id}, dep_country={dep_country}, arr_country={arr_country}, range_km={range_km}")
 
     if dep_country == arr_country:
-        return airport_id, 'domestic'
+        return airport_id, 'Domestic'
     elif range_km <= 4000:
-        return airport_id, 'international_short'
+        return airport_id, 'International Short-Haul'
     else:
-        return airport_id, 'international_long'
+        return airport_id, 'International Long-Haul'
 
 
 def get_gates_for_flight(db: Session, flight_id: int) -> list[GateDTO]:

@@ -296,6 +296,19 @@ def complete_operation(
     return op
 
 
-
+@router.put("/{operation_id}/gate/{gate_id}")
+def update_operation_gate(
+    operation_id: int,
+    gate_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("flightOperator")),
+):
+    try:
+        result = flight_operation_service.change_gate(db, operation_id, gate_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Operation not found")
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 

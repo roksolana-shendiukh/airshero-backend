@@ -297,4 +297,29 @@ def update_booking_passengers(db: Session, booking_id: int, data: UpdatePassenge
     db.commit()
 
 
+def get_bookings(db, skip=0, limit=50, status=None, airline_name=None, date_filter='this_month'):
+    return booking_repository.get_bookings(
+        db, skip=skip, limit=limit,
+        status=status,
+        airline_name=airline_name,
+        date_filter=date_filter,
+    )
+
+
+def cancel_booking(db: Session, booking_id: int):
+    booking = booking_repository.get_booking_by_id(db, booking_id)
+    if not booking:
+        raise ValueError("Booking not found")
+
+    cancellable_statuses = ["Confirmed", "Pending", "PartiallyPaid"]
+    if booking.status.booking_status_name not in cancellable_statuses:
+        raise ValueError("Booking cannot be cancelled")
+
+    flight_date = booking_repository.get_earliest_flight_date(db, booking_id)
+    if flight_date and flight_date <= datetime.now() + timedelta(hours=3):
+        raise ValueError("Cannot cancel booking — less than 3 hours before departure")
+
+    cancelled_id = booking_repository.get_booking_status_id(db, "Cancelled")
+    booking_repository.update_booking_status(db, booking_id, cancelled_id)
+    db.commit()
 

@@ -193,6 +193,7 @@ def insert_booking_item_no_passenger(db: Session, booking_id: int, flight_price_
     db.execute(sql, {"booking_id": booking_id, "flight_price_id": flight_price_id})
     db.flush()
 
+
 def delete_booking_items(db: Session, booking_id: int):
     db.execute(
         text("""
@@ -209,12 +210,14 @@ def delete_booking_items(db: Session, booking_id: int):
     )
     db.flush()
 
+
 def update_booking_amount(db: Session, booking_id: int, amount: float):
     sql = text("""
         UPDATE Booking SET booking_total_amount = :amount WHERE booking_id = :booking_id
     """)
     db.execute(sql, {"amount": amount, "booking_id": booking_id})
     db.flush()
+
 
 def get_passengers_with_email(db: Session, booking_id: int) -> list[dict]:
     rows = db.execute(text("""
@@ -242,3 +245,107 @@ def get_passengers_with_email(db: Session, booking_id: int) -> list[dict]:
     ]
 
 
+def get_bookings(db: Session, skip: int = 0, limit: int = 50,
+                 status: str | None = None,
+                 airline_name: str | None = None,
+                 date_filter: str | None = 'this_month'):
+
+    date_condition = ""
+    if date_filter == 'today':
+        date_condition = "AND CAST(f.departs_datetime AS DATE) = CAST(GETDATE() AS DATE)"
+    elif date_filter == 'this_week':
+        date_condition = "AND f.departs_datetime >= DATEADD(DAY, 1 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE)) AND f.departs_datetime < DATEADD(DAY, 8 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE))"
+    elif date_filter == 'this_month':
+        date_condition = "AND MONTH(f.departs_datetime) = MONTH(GETDATE()) AND YEAR(f.departs_datetime) = YEAR(GETDATE())"
+    elif date_filter == 'past':
+        date_condition = "AND f.departs_datetime < GETDATE()"
+
+
+    airline_condition = "AND al.airline_name = :airline_name" if airline_name else ""
+
+    sql = text(f"""
+        SELECT 
+            b.booking_id,
+            b.booking_number,
+            b.booking_date_time,
+            b.booking_total_amount,
+            bs.booking_status_name,
+            first_flight.from_city,
+            first_flight.to_city,
+            first_flight.departs_datetime,
+            first_flight.arrives_datetime,
+            first_flight.airline_name,
+            pax.passengers_list,
+            pax.passenger_count
+        FROM Booking b
+        JOIN BookingStatus bs ON b.booking_status_id = bs.booking_status_id
+        OUTER APPLY (
+            SELECT TOP 1
+                dep_city.city_name AS from_city,
+                arr_city.city_name AS to_city,
+                f.departs_datetime,
+                f.arrives_datetime,
+                al.airline_name
+            FROM BookingItem bi
+            JOIN FlightPrice fp ON bi.flight_price_id = fp.flight_price_id
+            JOIN FlightClass fc ON fp.flight_class_id = fc.flight_class_id
+            JOIN Flight f ON fc.flight_id = f.flight_id
+            JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+            JOIN Route r ON fs.route_id = r.route_id
+            JOIN Airline al ON r.airline_id = al.airline_id
+            JOIN Airport dep_a ON r.departs_airport_id = dep_a.airport_id
+            JOIN Airport arr_a ON r.arrives_airport_id = arr_a.airport_id
+            JOIN City dep_city ON dep_a.city_id = dep_city.city_id
+            JOIN City arr_city ON arr_a.city_id = arr_city.city_id
+            WHERE bi.booking_id = b.booking_id
+            {date_condition}
+            {airline_condition}
+            ORDER BY bi.booking_item_id
+        ) first_flight
+        OUTER APPLY (
+            SELECT 
+                STRING_AGG(
+                    p.passenger_first_name + ' ' + p.passenger_last_name, ', '
+                ) AS passengers_list,
+                COUNT(*) AS passenger_count
+            FROM BookingItem bi
+            JOIN PassengerDocument pd ON bi.passenger_document_id = pd.passenger_document_id
+            JOIN Passenger p ON pd.passenger_id = p.passenger_id
+            WHERE bi.booking_id = b.booking_id
+        ) pax
+        WHERE (:status IS NULL OR bs.booking_status_name = :status)
+          AND (:date_filter IS NULL OR :date_filter = 'all_time' OR first_flight.departs_datetime IS NOT NULL)
+        ORDER BY b.booking_date_time DESC
+        OFFSET :skip ROWS FETCH NEXT :limit ROWS ONLY
+    """)
+
+    params = {
+        "skip": skip,
+        "limit": limit,
+        "status": status,
+        "date_filter": date_filter,
+    }
+    if airline_name:
+        params["airline_name"] = airline_name
+
+    print(f"get_bookings: airline={airline_name}, status={status}, date_filter={date_filter}")
+    rows = db.execute(sql, params).fetchall()
+    print(f"get_bookings result: {len(rows)}")
+    return [dict(r._mapping) for r in rows]
+
+
+
+def get_earliest_flight_date(db: Session, booking_id: int):
+    from datetime import datetime
+    sql = text("""
+        SELECT MIN(f.departs_datetime) AS earliest
+        FROM BookingItem bi
+        JOIN FlightPrice fp ON bi.flight_price_id = fp.flight_price_id
+        JOIN FlightClass fc ON fp.flight_class_id = fc.flight_class_id
+        JOIN Flight f ON fc.flight_id = f.flight_id
+        WHERE bi.booking_id = :booking_id
+    """)
+    row = db.execute(sql, {"booking_id": booking_id}).fetchone()
+    return row.earliest if row and row.earliest else None
+
+##        AND (:airline_name IS NULL OR first_flight.airline_name = :airline_name)

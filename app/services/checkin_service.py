@@ -47,6 +47,7 @@ def get_suggestions_for_flight(
 
 def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: list[float]) -> dict:
     flight_info = checkin_repository.get_flight_info_for_booking_item(db, booking_item_id)
+    print(f">>> flight_info: {flight_info}")
     if not flight_info:
         raise HTTPException(status_code=404, detail="Flight info missing")
 
@@ -57,6 +58,8 @@ def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: 
     prepaid_overweight_fee = float(allowance.get("overweight_fee_per_kg") or 0.0) if allowance else 0.0
 
     rules = checkin_repository.get_flight_class_baggage_rules(db, flight_info["flight_class_id"])
+    print(f">>> rules found: {len(rules)} for flight_class_id={flight_info['flight_class_id']}")
+    print(f">>> rules: {rules}")
     if not rules:
         rules = [{
             "baggage_type_id":       0,
@@ -196,5 +199,36 @@ def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
 def get_boarding_pass_details(db: Session, boarding_pass_id: int) -> dict | None:
     return checkin_repository.get_boarding_pass_details(db, boarding_pass_id)
 
+
+def get_boarding_passes_history(
+    db, agent_id, search=None, route_city=None,
+    class_name=None, date_filter='today', skip=0, limit=50
+):
+    return checkin_repository.get_boarding_passes_history(
+        db, agent_id=agent_id,
+        search=search,
+        route_city=route_city,
+        class_name=class_name,
+        date_filter=date_filter,
+        skip=skip, limit=limit,
+    )
+
+
+def get_baggage_units(db, boarding_pass_id):
+    return checkin_repository.get_baggage_units(db, boarding_pass_id)
+
+
+def get_boarding_pass_classes(db, agent_id):
+    return checkin_repository.get_boarding_pass_classes(db, agent_id)
+
+def get_boarding_pass_cities(db, agent_id):
+    return checkin_repository.get_boarding_pass_cities(db, agent_id)
+
+
+def reprint_boarding_pass(db: Session, boarding_pass_id: int) -> None:
+    checkin_repository.reprint_boarding_pass(db, boarding_pass_id)
+
+def update_boarding_pass_seat(db: Session, boarding_pass_id: int, seat_layout_id: int) -> None:
+    checkin_repository.update_boarding_pass_seat(db, boarding_pass_id, seat_layout_id)
 
 

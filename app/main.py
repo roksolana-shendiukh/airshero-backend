@@ -26,7 +26,9 @@ from app.controllers import (
     flight_crew_controller,
     planning_controller,
     airline_controller,
-    analytics_controller
+    analytics_controller,
+    user_controller,
+    crew_controller
 )
 
 scheduler = BackgroundScheduler()
@@ -67,6 +69,8 @@ app.include_router(flight_crew_controller.router)
 app.include_router(planning_controller.router)
 app.include_router(airline_controller.router)
 app.include_router(analytics_controller.router)
+app.include_router(user_controller.router)
+app.include_router(crew_controller.router)
 
 
 @app.on_event("startup")

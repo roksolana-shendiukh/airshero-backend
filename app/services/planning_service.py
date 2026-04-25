@@ -198,42 +198,64 @@ def create_route_with_schedule(
     flight_end_date: str,
     schedule_groups: list[dict],
 ) -> dict:
-    if flight_number is None:
-        flight_number = planning_repository.generate_flight_number(db, airline_id)
-    elif planning_repository.check_flight_number_exists(db, flight_number):
-        raise ValueError(f"Flight number '{flight_number}' already exists")
-
     all_new_days = []
     for group in schedule_groups:
         all_new_days.extend(group["day_ids"])
     if len(all_new_days) != len(set(all_new_days)):
         raise ValueError("Schedule groups contain overlapping days")
 
-    calculated = planning_repository.calculate_route_range_and_duration(
-        db,
-        departs_airport_id=departs_airport_id,
-        arrives_airport_id=arrives_airport_id,
-        airfleet_id=airfleet_id,
-    )
-
-    if not planning_repository.check_aircraft_range(
-        db, airfleet_id, calculated["range_km"]
-    ):
-        raise ValueError(
-            f"Aircraft range is insufficient for this route "
-            f"({calculated['range_km']} km required)"
-        )
-
-    route_id = planning_repository.create_route(
+    existing_route_id = planning_repository.get_existing_route(
         db,
         airline_id=airline_id,
         airfleet_id=airfleet_id,
         departs_airport_id=departs_airport_id,
         arrives_airport_id=arrives_airport_id,
-        flight_number=flight_number,
-        flight_range=calculated["range_km"],
-        flight_duration=calculated["duration"],
     )
+
+    if existing_route_id:
+        route_id = existing_route_id
+
+        overlapping = planning_repository.check_schedule_overlap(
+            db, route_id, flight_start_date, flight_end_date, schedule_groups
+        )
+        if overlapping:
+            raise ValueError(
+                f"Schedule overlaps with existing schedule on days: "
+                f"{', '.join(overlapping)}"
+            )
+    else:
+        if flight_number is None:
+            flight_number = planning_repository.generate_flight_number(
+                db, airline_id)
+        elif planning_repository.check_flight_number_exists(db, flight_number):
+            raise ValueError(
+                f"Flight number '{flight_number}' already exists")
+
+        calculated = planning_repository.calculate_route_range_and_duration(
+            db,
+            departs_airport_id=departs_airport_id,
+            arrives_airport_id=arrives_airport_id,
+            airfleet_id=airfleet_id,
+        )
+
+        if not planning_repository.check_aircraft_range(
+            db, airfleet_id, calculated["range_km"]
+        ):
+            raise ValueError(
+                f"Aircraft range is insufficient for this route "
+                f"({calculated['range_km']} km required)"
+            )
+
+        route_id = planning_repository.create_route(
+            db,
+            airline_id=airline_id,
+            airfleet_id=airfleet_id,
+            departs_airport_id=departs_airport_id,
+            arrives_airport_id=arrives_airport_id,
+            flight_number=flight_number,
+            flight_range=calculated["range_km"],
+            flight_duration=calculated["duration"],
+        )
 
     flight_schedule_id, flights_count = _create_schedule_and_flights(
         db,
@@ -249,8 +271,6 @@ def create_route_with_schedule(
         "routeId":          route_id,
         "flightScheduleId": flight_schedule_id,
         "flightsGenerated": flights_count,
-        "rangeKm":          calculated["range_km"],
-        "duration":         calculated["duration"],
     }
 
 
@@ -311,7 +331,7 @@ def _create_schedule_and_flights(
         schedule_groups=schedule_groups,
     )
 
-    scheduled_status_id = planning_repository.get_status_id_by_name(db, "Planned")
+    scheduled_status_id = planning_repository.get_status_id_by_name(db, "Auto-scheduled")
 
     flights_count = planning_repository.generate_flights_for_schedule(
         db,
@@ -333,4 +353,228 @@ def generate_flight_number(db: Session, airline_id: int) -> dict:
 
 def get_all_flight_numbers(db: Session, airline_id: int) -> list[str]:
     return planning_repository.get_all_flight_numbers(db, airline_id)
+
+
+def get_route_duration(
+    db: Session,
+    airfleet_id: int,
+    departs_airport_id: int,
+    arrives_airport_id: int,
+) -> dict:
+    return planning_repository.calculate_route_range_and_duration(
+        db,
+        departs_airport_id=departs_airport_id,
+        arrives_airport_id=arrives_airport_id,
+        airfleet_id=airfleet_id,
+    )
+
+
+
+def get_routes_with_planned_flights(db: Session, airline_id: int) -> list[dict]:
+    rows = planning_repository.get_routes_with_planned_flights(db, airline_id)
+    return [
+        {
+            "routeId":      r["route_id"],
+            "flightNumber": r["flight_number"],
+            "aircraftModel": r["aircraft_model"],
+            "departsCode":  r["departs_code"],
+            "arrivesCode":  r["arrives_code"],
+            "plannedCount": r["planned_count"],
+        }
+        for r in rows
+    ]
+
+
+def get_planned_flights_for_route(db: Session, route_id: int) -> list[dict]:
+    rows = planning_repository.get_planned_flights_for_route(db, route_id)
+    result = []
+    for r in rows:
+        prices = planning_repository.get_current_prices_for_flight(
+            db, r["flight_id"])
+        result.append({
+            "flightId":        r["flight_id"],
+            "flightNumber":    r["flight_number"],
+            "departsDatetime": r["departs_datetime"].isoformat(),
+            "arrivesDatetime": r["arrives_datetime"].isoformat(),
+            "flightDuration":  r["flight_duration"],
+            "departsCode":     r["departs_code"],
+            "arrivesCode":     r["arrives_code"],
+            "aircraftModel":   r["aircraft_model"],
+            "airfleetId":      r["airfleet_id"],
+            "prices": [
+                {
+                    "classId":   p["class_id"],
+                    "className": p["class_name"],
+                    "price":     float(p["ticket_price"]),
+                }
+                for p in prices
+            ],
+        })
+    return result
+
+def configure_planned_flight(
+    db: Session,
+    flight_id: int,
+    class_prices: list[dict],
+) -> dict:
+    planning_repository.configure_planned_flight(db, flight_id, class_prices)
+    return {"flightId": flight_id, "status": "Scheduled"}
+
+
+def get_scheduled_flights_for_pricing(
+    db: Session, airline_id: int
+) -> list[dict]:
+    rows = planning_repository.get_scheduled_flights_for_pricing(
+        db, airline_id)
+    result = []
+    for r in rows:
+        prices = planning_repository.get_current_prices_for_flight(
+            db, r["flight_id"])
+        result.append({
+            "flightId":        r["flight_id"],
+            "flightNumber":    r["flight_number"],
+            "flightStatus":    r["flight_status_name"],
+            "departsCode":     r["departs_code"],
+            "arrivesCode":     r["arrives_code"],
+            "departsDatetime": r["departs_datetime"].isoformat(),
+            "arrivesDatetime": r["arrives_datetime"].isoformat(),
+            "flightDuration":  r["flight_duration"],
+            "aircraftModel":   r["aircraft_model"],
+            "prices": [
+                {
+                    "classId":       p["class_id"],
+                    "className":     p["class_name"],
+                    "price":         float(p["ticket_price"]),
+                    "publishedDate": str(p["flight_published_date"]),
+                }
+                for p in prices
+            ],
+        })
+    return result
+
+
+def get_price_history_for_flight(
+    db: Session, flight_id: int
+) -> list[dict]:
+    rows = planning_repository.get_price_history_for_flight(db, flight_id)
+    history: dict[str, dict] = {}
+    for r in rows:
+        date = str(r["flight_published_date"])
+        if date not in history:
+            history[date] = {"date": date, "prices": []}
+        history[date]["prices"].append({
+            "className": r["class_name"],
+            "price":     float(r["ticket_price"]),
+        })
+    return list(history.values())
+
+
+def update_flight_prices(
+    db: Session,
+    flight_id: int,
+    class_prices: list[dict],
+) -> dict:
+    planning_repository.update_flight_prices(db, flight_id, class_prices)
+    return {"flightId": flight_id, "updated": len(class_prices)}
+
+
+def get_routes_with_pricing_flights(db: Session, airline_id: int) -> list[dict]:
+    rows = planning_repository.get_routes_with_pricing_flights(db, airline_id)
+    return [
+        {
+            "routeId":        r["route_id"],
+            "flightNumber":   r["flight_number"],
+            "aircraftModel":  r["aircraft_model"],
+            "departsCode":    r["departs_code"],
+            "arrivesCode":    r["arrives_code"],
+            "totalCount":     r["total_count"],
+            "autoCount":      r["auto_count"],
+            "confirmedCount": r["confirmed_count"],
+            "departsTime": r["departs_time"],
+            "arrivesTime": r["arrives_time"],
+        }
+        for r in rows
+    ]
+
+
+def get_pricing_flights_for_route(db: Session, route_id: int) -> list[dict]:
+    rows = planning_repository.get_pricing_flights_for_route(db, route_id)
+    result = []
+    for r in rows:
+        prices = planning_repository.get_current_prices_for_flight(
+            db, r["flight_id"])
+        result.append({
+            "flightId":        r["flight_id"],
+            "flightNumber":    r["flight_number"],
+            "departsDatetime": r["departs_datetime"].isoformat(),
+            "arrivesDatetime": r["arrives_datetime"].isoformat(),
+            "flightDuration":  r["flight_duration"],
+            "departsCode":     r["departs_code"],
+            "arrivesCode":     r["arrives_code"],
+            "flightStatus":    r["flight_status_name"],
+            "prices": [
+                {
+                    "classId":       p["class_id"],
+                    "className":     p["class_name"],
+                    "price":         float(p["ticket_price"]),
+                    "publishedDate": str(p["flight_published_date"]),
+                }
+                for p in prices
+            ],
+        })
+    return result
+
+
+def get_all_flights_for_route(db: Session, route_id: int) -> list[dict]:
+    rows = planning_repository.get_all_flights_for_route(db, route_id)
+    result = []
+    for r in rows:
+        prices = planning_repository.get_current_prices_for_flight(
+            db, r["flight_id"])
+        result.append({
+            "flightId":        r["flight_id"],
+            "flightNumber":    r["flight_number"],
+            "departsDatetime": r["departs_datetime"].isoformat(),
+            "arrivesDatetime": r["arrives_datetime"].isoformat(),
+            "flightDuration":  r["flight_duration"],
+            "departsCode":     r["departs_code"],
+            "arrivesCode":     r["arrives_code"],
+            "aircraftModel":   r["aircraft_model"],
+            "airfleetId":      r["airfleet_id"],
+            "flightStatus":    r["flight_status_name"],
+            "prices": [
+                {
+                    "classId":   p["class_id"],
+                    "className": p["class_name"],
+                    "price":     float(p["ticket_price"]),
+                }
+                for p in prices
+            ],
+        })
+    return result
+
+
+def confirm_flights(db: Session, flight_ids: list[int]) -> dict:
+    count = planning_repository.confirm_flights(db, flight_ids)
+    return {"confirmed": count}
+
+
+def update_flight_classes(
+    db: Session,
+    flight_id: int,
+    class_ids: list[int],
+) -> dict:
+    planning_repository.update_flight_classes(db, flight_id, class_ids)
+    return {"flightId": flight_id, "updated": True}
+
+
+def update_flight_baggage(
+    db: Session,
+    flight_id: int,
+    baggage_options: list[dict],
+) -> dict:
+    planning_repository.update_flight_baggage(db, flight_id, baggage_options)
+    return {"flightId": flight_id, "updated": True}
+
+
 

@@ -114,6 +114,7 @@ def get_available_for_operation(
 
     return [(g, g.gate_id not in busy_gate_ids) for g in gates]
 
+
 def get_all(
     db: Session,
     airport_id: int | None = None,
@@ -132,11 +133,16 @@ def get_all(
 
 
 def _allowed_terminal_types(route_type: str) -> list[str]:
-    if route_type == 'domestic':
-        return ['Domestic', 'International Short-Haul', 'International Long-Haul']
-    elif route_type == 'international_short':
+    rt = route_type.lower()
+    
+    if rt == 'domestic':
+        return ['Domestic', 'International', 'International Short-Haul', 'International Long-Haul']
+    
+    elif rt == 'international_short':
         return ['International', 'International Short-Haul']
+    
     else:
         return ['International', 'International Long-Haul']
-    
+
+
 

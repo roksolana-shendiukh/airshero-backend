@@ -213,6 +213,64 @@ def create_user(
     except FirebaseError as e:
         raise HTTPException(status_code=503, detail=f"Firebase service unavailable: {str(e)}")
 
+def update_profile(
+    uid: str,
+    first_name: str | None,
+    last_name: str | None,
+    email: str | None,
+) -> dict:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+
+    update_kwargs = {}
+
+    if first_name:
+        first_name = _validate_name(first_name, "firstName")
+        claims["firstName"] = first_name
+        update_kwargs["display_name"] = f"{first_name} {claims.get('lastName', '')}"
+
+    if last_name:
+        last_name = _validate_name(last_name, "lastName")
+        claims["lastName"] = last_name
+        update_kwargs["display_name"] = (
+            f"{claims.get('firstName', '')} {last_name}"
+        )
+
+    if email:
+        email = email.strip()
+        if len(email) > 45:
+            raise HTTPException(status_code=422, detail=[{
+                "loc": ["body", "email"],
+                "msg": "Email must be at most 45 characters"
+            }])
+        try:
+            existing = auth.get_user_by_email(email)
+            if existing.uid != uid:
+                raise HTTPException(status_code=422, detail=[{
+                    "loc": ["body", "email"],
+                    "msg": "Email already in use"
+                }])
+        except auth.UserNotFoundError:
+            pass
+        update_kwargs["email"] = email
+
+    if update_kwargs:
+        auth.update_user(uid, **update_kwargs)
+
+    auth.set_custom_user_claims(uid, claims)
+
+    return {"uid": uid, "updated": True}
+
+
+def update_profile_photo(uid: str, photo_url: str) -> dict:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+    claims["avatarUrl"] = photo_url
+    auth.update_user(uid, photo_url=photo_url)
+    auth.set_custom_user_claims(uid, claims)
+    return {"uid": uid, "avatarUrl": photo_url}
+
+
 def set_role(uid: str, role_id: int):
     role = ID_TO_ROLE.get(role_id)
     if not role:

@@ -6,6 +6,7 @@ from app.dependencies.auth import require_role
 from app.schemas.checkin_schema import IssueBoardingPassDTO, CalculateBaggageRequestDTO, CalculateBaggageResponseDTO, IssueCheckinDTO
 from app.schemas.boarding_pass_schema import BoardingPassDTO
 from app.services import checkin_service, reference_service
+from fastapi import Body
 
 router = APIRouter(prefix="/checkin", tags=["Check-In"])
 
@@ -164,5 +165,79 @@ def get_boarding_pass(
     if not result:
         raise HTTPException(status_code=404, detail="Boarding pass not found")
     return result
+
+
+@router.get("/boarding-passes")
+def get_boarding_passes(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+    search: str | None = Query(None),
+    route_city: str | None = Query(None),
+    class_name: str | None = Query(None),
+    date_filter: str | None = Query('today'),
+    skip: int = 0,
+    limit: int = 50,
+):
+    agent_id = user.get("agentId")
+    if not agent_id:
+        raise HTTPException(status_code=403, detail="Agent not assigned")
+    return checkin_service.get_boarding_passes_history(
+        db, agent_id=agent_id,
+        search=search,
+        route_city=route_city,
+        class_name=class_name,
+        date_filter=date_filter,
+        skip=skip, limit=limit,
+    )
+
+
+@router.get("/boarding-pass/{boarding_pass_id}/baggage")
+def get_boarding_pass_baggage(
+    boarding_pass_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    return checkin_service.get_baggage_units(db, boarding_pass_id)
+
+
+@router.get("/boarding-passes/classes")
+def get_boarding_pass_classes(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    agent_id = user.get("agentId")
+    if not agent_id:
+        raise HTTPException(status_code=403, detail="Agent not assigned")
+    return checkin_service.get_boarding_pass_classes(db, agent_id)
+
+@router.get("/boarding-passes/cities")
+def get_boarding_pass_cities(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("checkInAgent")),
+):
+    agent_id = user.get("agentId")
+    if not agent_id:
+        raise HTTPException(status_code=403, detail="Agent not assigned")
+    return checkin_service.get_boarding_pass_cities(db, agent_id)
+
+
+@router.put("/boarding-pass/{boarding_pass_id}/reprint")
+def reprint_boarding_pass(
+    boarding_pass_id: int,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("checkInAgent")),
+):
+    checkin_service.reprint_boarding_pass(db, boarding_pass_id)
+    return {"ok": True}
+
+@router.put("/boarding-pass/{boarding_pass_id}/seat")
+def update_seat(
+    boarding_pass_id: int,
+    seat_layout_id: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    user = Depends(require_role("checkInAgent")),
+):
+    checkin_service.update_boarding_pass_seat(db, boarding_pass_id, seat_layout_id)
+    return {"ok": True}
 
 

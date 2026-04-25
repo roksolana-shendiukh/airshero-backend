@@ -4,7 +4,6 @@ from datetime import date, timedelta
 import random
 
 
-
 def get_overview_flights(
     db: Session,
     airline_id: int,
@@ -59,7 +58,7 @@ def get_overview_flights(
         INNER JOIN Airport dep_air      ON r.departs_airport_id = dep_air.airport_id
         INNER JOIN Airport arr_air      ON r.arrives_airport_id = arr_air.airport_id
         INNER JOIN FlightStatus fs      ON f.flight_status_id = fs.flight_status_id
-        INNER JOIN FlightClass fc       ON f.flight_id = fc.flight_id
+        LEFT JOIN FlightClass fc       ON f.flight_id = fc.flight_id
         INNER JOIN Class c              ON fc.class_id = c.class_id
         INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
             AND fp.flight_published_date = (
@@ -503,6 +502,16 @@ def create_schedule_for_route(
     flight_end_date: str,
     schedule_groups: list[dict],
 ) -> int:
+    from datetime import datetime, timedelta
+
+    sql_duration = text("""
+        SELECT CONVERT(VARCHAR(5), r.flight_duration, 108) AS flight_duration
+        FROM Route r WHERE r.route_id = :route_id
+    """)
+    duration_str = db.execute(sql_duration, {"route_id": route_id}).scalar()
+    h, m = map(int, duration_str.split(":"))
+    duration_delta = timedelta(hours=h, minutes=m)
+
     sql_fs = text("""
         INSERT INTO FlightSchedule (route_id, flight_start_date, flight_end_date)
         OUTPUT INSERTED.flight_schedule_id
@@ -516,14 +525,19 @@ def create_schedule_for_route(
     flight_schedule_id = result.scalar()
 
     for group in schedule_groups:
+        dep_time = group["departure_time"]
+        dep_dt = datetime.strptime(dep_time, "%H:%M")
+        arr_dt = dep_dt + duration_delta
+        arr_time = arr_dt.strftime("%H:%M")
+
         sql_s = text("""
             INSERT INTO Schedule (schedule_departure_time, schedule_arrival_time)
             OUTPUT INSERTED.schedule_id
             VALUES (:dep_time, :arr_time)
         """)
         schedule_id = db.execute(sql_s, {
-            "dep_time": group["departure_time"],
-            "arr_time": group["arrival_time"],
+            "dep_time": dep_time,
+            "arr_time": arr_time,
         }).scalar()
 
         for day_id in group["day_ids"]:
@@ -567,29 +581,11 @@ def generate_flights_for_schedule(
     h, m = map(int, duration_str.split(":"))
     duration_delta = timedelta(hours=h, minutes=m)
 
-    day_map = {
-        1: 0, 
-        2: 1,  
-        3: 2,  
-        4: 3,  
-        5: 4,  
-        6: 5,  
-        7: 6,  
-    }
-
+    day_map = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6}
     start = date.fromisoformat(flight_start_date)
     end = date.fromisoformat(flight_end_date)
 
-    flight_days: list[tuple[date, str, str]] = []
-    for group in schedule_groups:
-        weekdays = {day_map[d] for d in group["day_ids"]}
-        dep_time = group["departure_time"]
-        arr_time = group["arrival_time"]
-        current = start
-        while current <= end:
-            if current.weekday() in weekdays:
-                flight_days.append((current, dep_time, arr_time))
-            current += timedelta(days=1)
+    source_flight_id = get_last_configured_flight_for_route(db, route_id)
 
     sql_flight = text("""
         INSERT INTO Flight (
@@ -604,20 +600,29 @@ def generate_flights_for_schedule(
     """)
 
     count = 0
-    for flight_date, dep_time, arr_time in flight_days:
-        dep_dt = f"{flight_date}T{dep_time}:00"
-        from datetime import datetime
-        dep_datetime = datetime.fromisoformat(dep_dt)
-        arr_datetime = dep_datetime + duration_delta
-        arr_dt = arr_datetime.isoformat()
+    for group in schedule_groups:
+        weekdays = {day_map[d] for d in group["day_ids"]}
+        dep_time = group["departure_time"]
+        current = start
+        while current <= end:
+            if current.weekday() in weekdays:
+                from datetime import datetime
+                dep_dt = datetime.fromisoformat(f"{current}T{dep_time}:00")
+                arr_dt = dep_dt + duration_delta
 
-        db.execute(sql_flight, {
-            "flight_schedule_id": flight_schedule_id,
-            "flight_status_id": flight_status_id,
-            "departs_datetime": dep_dt,
-            "arrives_datetime": arr_dt,
-        })
-        count += 1
+                result = db.execute(sql_flight, {
+                    "flight_schedule_id": flight_schedule_id,
+                    "flight_status_id": flight_status_id,
+                    "departs_datetime": dep_dt.isoformat(),
+                    "arrives_datetime": arr_dt.isoformat(),
+                })
+                new_flight_id = result.scalar()
+
+                if source_flight_id:
+                    copy_flight_configuration(db, source_flight_id, new_flight_id)
+
+                count += 1
+            current += timedelta(days=1)
 
     return count
 
@@ -717,5 +722,506 @@ def get_all_flight_numbers(db: Session, airline_id: int) -> list[str]:
     rows = db.execute(sql, {"airline_id": airline_id}).fetchall()
     return [r[0] for r in rows]
 
+
+def get_routes_with_planned_flights(db: Session, airline_id: int) -> list:
+    sql = text("""
+        SELECT
+            r.route_id,
+            r.flight_number,
+            af.aircraft_model,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            COUNT(f.flight_id) AS planned_count
+        FROM Route r
+        INNER JOIN Airline al ON r.airline_id = al.airline_id
+        INNER JOIN Airfleet af ON r.airfleet_id = af.airfleet_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightSchedule fs ON fs.route_id = r.route_id
+        INNER JOIN Flight f ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE al.airline_id = :airline_id
+          AND fst.flight_status_name = 'Auto-scheduled'
+        GROUP BY
+            r.route_id, r.flight_number,
+            af.aircraft_model,
+            dep.airport_code, arr.airport_code
+        ORDER BY r.flight_number
+    """)
+    return db.execute(sql, {"airline_id": airline_id}).mappings().all()
+
+
+def get_planned_flights_for_route(db: Session, route_id: int) -> list:
+    sql = text("""
+        SELECT
+            f.flight_id,
+            r.flight_number,
+            f.departs_datetime,
+            f.arrives_datetime,
+            CONVERT(VARCHAR(5), r.flight_duration, 108) AS flight_duration,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            af.aircraft_model,
+            af.airfleet_id
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN Airfleet af ON r.airfleet_id = af.airfleet_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE r.route_id = :route_id
+          AND fst.flight_status_name = 'Auto-scheduled'
+        ORDER BY f.departs_datetime
+    """)
+    return db.execute(sql, {"route_id": route_id}).mappings().all()
+
+
+def configure_planned_flight(
+    db: Session,
+    flight_id: int,
+    class_prices: list[dict],
+) -> None:
+    for cp in class_prices:
+        sql_fc = text("""
+            INSERT INTO FlightClass (class_id, flight_id)
+            OUTPUT INSERTED.flight_class_id
+            VALUES (:class_id, :flight_id)
+        """)
+        fc_result = db.execute(sql_fc, {
+            "class_id": cp["class_id"],
+            "flight_id": flight_id,
+        })
+        flight_class_id = fc_result.scalar()
+
+        sql_fp = text("""
+            INSERT INTO FlightPrice (flight_class_id, flight_published_date, ticket_price)
+            VALUES (:flight_class_id, CAST(GETDATE() AS DATE), :ticket_price)
+        """)
+        db.execute(sql_fp, {
+            "flight_class_id": flight_class_id,
+            "ticket_price": cp["price"],
+        })
+
+    scheduled_id = get_status_id_by_name(db, "Scheduled")
+    db.execute(text("""
+        UPDATE Flight SET flight_status_id = :status_id
+        WHERE flight_id = :flight_id
+    """), {"status_id": scheduled_id, "flight_id": flight_id})
+
+    db.commit()
+
+
+def get_scheduled_flights_for_pricing(db: Session, airline_id: int) -> list:
+    sql = text("""
+        SELECT
+            f.flight_id,
+            r.flight_number,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            f.departs_datetime,
+            f.arrives_datetime,
+            CONVERT(VARCHAR(5), r.flight_duration, 108) AS flight_duration,
+            af.aircraft_model,
+            r.route_id,
+            fst.flight_status_name
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN Airline al ON r.airline_id = al.airline_id
+        INNER JOIN Airfleet af ON r.airfleet_id = af.airfleet_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE al.airline_id = :airline_id
+          AND fst.flight_status_name IN ('Scheduled', 'Auto-scheduled')
+        ORDER BY f.departs_datetime ASC
+    """)
+    return db.execute(sql, {"airline_id": airline_id}).mappings().all()
+
+
+def get_current_prices_for_flight(db: Session, flight_id: int) -> list:
+    sql = text("""
+        SELECT
+            fc.class_id,
+            c.class_name,
+            fp.ticket_price,
+            fp.flight_published_date,
+            fp.flight_class_id
+        FROM FlightClass fc
+        INNER JOIN Class c ON fc.class_id = c.class_id
+        INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
+            AND fp.flight_published_date = (
+                SELECT MAX(fp2.flight_published_date)
+                FROM FlightPrice fp2
+                WHERE fp2.flight_class_id = fc.flight_class_id
+            )
+        WHERE fc.flight_id = :flight_id
+        ORDER BY c.class_name
+    """)
+    return db.execute(sql, {"flight_id": flight_id}).mappings().all()
+
+
+def get_price_history_for_flight(db: Session, flight_id: int) -> list:
+    sql = text("""
+        SELECT
+            fp.flight_published_date,
+            c.class_name,
+            fp.ticket_price
+        FROM FlightClass fc
+        INNER JOIN Class c ON fc.class_id = c.class_id
+        INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
+        WHERE fc.flight_id = :flight_id
+        ORDER BY fp.flight_published_date DESC, c.class_name
+    """)
+    return db.execute(sql, {"flight_id": flight_id}).mappings().all()
+
+
+def update_flight_prices(
+    db: Session,
+    flight_id: int,
+    class_prices: list[dict],
+) -> None:
+    for cp in class_prices:
+        sql = text("""
+            INSERT INTO FlightPrice (flight_class_id, flight_published_date, ticket_price)
+            SELECT fc.flight_class_id, CAST(GETDATE() AS DATE), :price
+            FROM FlightClass fc
+            WHERE fc.flight_id = :flight_id
+              AND fc.class_id = :class_id
+        """)
+        db.execute(sql, {
+            "flight_id": flight_id,
+            "class_id": cp["class_id"],
+            "price": cp["price"],
+        })
+
+    scheduled_id = get_status_id_by_name(db, "Scheduled")
+    db.execute(text("""
+        UPDATE Flight SET flight_status_id = :status_id
+        WHERE flight_id = :flight_id
+    """), {"status_id": scheduled_id, "flight_id": flight_id})
+
+    db.commit()
+
+
+def get_existing_route(
+    db: Session,
+    airline_id: int,
+    airfleet_id: int,
+    departs_airport_id: int,
+    arrives_airport_id: int,
+) -> int | None:
+    sql = text("""
+        SELECT TOP 1 route_id FROM Route
+        WHERE airline_id = :airline_id
+          AND airfleet_id = :airfleet_id
+          AND departs_airport_id = :departs_airport_id
+          AND arrives_airport_id = :arrives_airport_id
+    """)
+    return db.execute(sql, {
+        "airline_id": airline_id,
+        "airfleet_id": airfleet_id,
+        "departs_airport_id": departs_airport_id,
+        "arrives_airport_id": arrives_airport_id,
+    }).scalar()
+
+
+def get_last_configured_flight_for_route(db: Session, route_id: int) -> int | None:
+    sql = text("""
+        SELECT TOP 1 f.flight_id
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        INNER JOIN FlightClass fc ON fc.flight_id = f.flight_id
+        WHERE fst.flight_status_name = 'Scheduled'
+          AND r.departs_airport_id = (
+              SELECT departs_airport_id FROM Route WHERE route_id = :route_id)
+          AND r.arrives_airport_id = (
+              SELECT arrives_airport_id FROM Route WHERE route_id = :route_id)
+          AND r.airline_id = (
+              SELECT airline_id FROM Route WHERE route_id = :route_id)
+        ORDER BY f.departs_datetime DESC
+    """)
+    return db.execute(sql, {"route_id": route_id}).scalar()
+
+
+def copy_flight_configuration(
+    db: Session,
+    source_flight_id: int,
+    target_flight_id: int,
+) -> None:
+    sql_classes = text("""
+        SELECT class_id FROM FlightClass
+        WHERE flight_id = :flight_id
+    """)
+    classes = db.execute(sql_classes,
+        {"flight_id": source_flight_id}).fetchall()
+
+    for cls in classes:
+        class_id = cls[0]
+
+        sql_fc = text("""
+            INSERT INTO FlightClass (class_id, flight_id)
+            OUTPUT INSERTED.flight_class_id
+            VALUES (:class_id, :flight_id)
+        """)
+        new_fc_id = db.execute(sql_fc, {
+            "class_id": class_id,
+            "flight_id": target_flight_id,
+        }).scalar()
+
+        sql_price = text("""
+            INSERT INTO FlightPrice (flight_class_id, flight_published_date, ticket_price)
+            SELECT :new_fc_id, CAST(GETDATE() AS DATE), fp.ticket_price
+            FROM FlightClass fc
+            INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
+                AND fp.flight_published_date = (
+                    SELECT MAX(fp2.flight_published_date)
+                    FROM FlightPrice fp2
+                    WHERE fp2.flight_class_id = fc.flight_class_id
+                )
+            WHERE fc.flight_id = :source_flight_id
+              AND fc.class_id = :class_id
+        """)
+        db.execute(sql_price, {
+            "new_fc_id": new_fc_id,
+            "source_flight_id": source_flight_id,
+            "class_id": class_id,
+        })
+
+        sql_baggage = text("""
+            INSERT INTO BaggagePricingInFlight
+                (flight_id, baggage_pricing_rule_id, flight_class_id, baggage_price)
+            SELECT :target_flight_id, bpif.baggage_pricing_rule_id,
+                   :new_fc_id, bpif.baggage_price
+            FROM BaggagePricingInFlight bpif
+            INNER JOIN FlightClass fc ON bpif.flight_class_id = fc.flight_class_id
+            WHERE bpif.flight_id = :source_flight_id
+              AND fc.class_id = :class_id
+        """)
+        db.execute(sql_baggage, {
+            "target_flight_id": target_flight_id,
+            "new_fc_id": new_fc_id,
+            "source_flight_id": source_flight_id,
+            "class_id": class_id,
+        })
+
+
+def get_routes_with_pricing_flights(db: Session, airline_id: int) -> list:
+    sql = text("""
+        SELECT
+            r.route_id,
+            r.flight_number,
+            af.aircraft_model,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            COUNT(f.flight_id) AS total_count,
+            SUM(CASE WHEN fst.flight_status_name = 'Auto-scheduled' THEN 1 ELSE 0 END) AS auto_count,
+            SUM(CASE WHEN fst.flight_status_name = 'Scheduled' THEN 1 ELSE 0 END) AS confirmed_count,
+            MIN(CONVERT(VARCHAR(5), f.departs_datetime, 108)) AS departs_time,
+            MIN(CONVERT(VARCHAR(5), f.arrives_datetime, 108)) AS arrives_time
+        FROM Route r
+        INNER JOIN Airline al ON r.airline_id = al.airline_id
+        INNER JOIN Airfleet af ON r.airfleet_id = af.airfleet_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightSchedule fs ON fs.route_id = r.route_id
+        INNER JOIN Flight f ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE al.airline_id = :airline_id
+          AND fst.flight_status_name IN ('Scheduled')
+               AND CAST(f.departs_datetime AS DATE) >= CAST(GETDATE() AS DATE)
+        GROUP BY
+            r.route_id, r.flight_number,
+            af.aircraft_model,
+            dep.airport_code, arr.airport_code
+        ORDER BY r.flight_number
+    """)
+    return db.execute(sql, {"airline_id": airline_id}).mappings().all()
+
+
+def get_pricing_flights_for_route(db: Session, route_id: int) -> list:
+    sql = text("""
+        SELECT
+            f.flight_id,
+            r.flight_number,
+            f.departs_datetime,
+            f.arrives_datetime,
+            CONVERT(VARCHAR(5), r.flight_duration, 108) AS flight_duration,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            fst.flight_status_name
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE r.route_id = :route_id
+          AND fst.flight_status_name IN ('Scheduled')
+               AND CAST(f.departs_datetime AS DATE) >= CAST(GETDATE() AS DATE)AND CAST(f.departs_datetime AS DATE) >= CAST(GETDATE() AS DATE)
+        ORDER BY f.departs_datetime ASC
+    """)
+    return db.execute(sql, {"route_id": route_id}).mappings().all()
+
+
+def get_all_flights_for_route(db: Session, route_id: int) -> list:
+    sql = text("""
+        SELECT
+            f.flight_id,
+            r.flight_number,
+            f.departs_datetime,
+            f.arrives_datetime,
+            CONVERT(VARCHAR(5), r.flight_duration, 108) AS flight_duration,
+            dep.airport_code AS departs_code,
+            arr.airport_code AS arrives_code,
+            af.aircraft_model,
+            af.airfleet_id,
+            fst.flight_status_name
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN Airfleet af ON r.airfleet_id = af.airfleet_id
+        INNER JOIN Airport dep ON r.departs_airport_id = dep.airport_id
+        INNER JOIN Airport arr ON r.arrives_airport_id = arr.airport_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE r.route_id = :route_id
+          AND fst.flight_status_name IN ('Auto-scheduled', 'Scheduled')
+        ORDER BY f.departs_datetime
+    """)
+    return db.execute(sql, {"route_id": route_id}).mappings().all()
+
+
+def confirm_flights(db: Session, flight_ids: list[int]) -> int:
+    scheduled_id = get_status_id_by_name(db, "Scheduled")
+    auto_id = get_status_id_by_name(db, "Auto-scheduled")
+    
+    count = 0
+    for flight_id in flight_ids:
+        result = db.execute(text("""
+            UPDATE Flight
+            SET flight_status_id = :scheduled_id
+            WHERE flight_id = :flight_id
+              AND flight_status_id = :auto_id
+        """), {
+            "scheduled_id": scheduled_id,
+            "flight_id": flight_id,
+            "auto_id": auto_id,
+        })
+        count += result.rowcount
+    
+    db.commit()
+    return count
+
+
+def update_flight_classes(
+    db: Session,
+    flight_id: int,
+    class_ids: list[int],
+) -> None:
+    sql_existing = text("""
+        SELECT class_id FROM FlightClass WHERE flight_id = :flight_id
+    """)
+    existing = {r[0] for r in db.execute(
+        sql_existing, {"flight_id": flight_id}).fetchall()}
+
+    for class_id in existing:
+        if class_id not in class_ids:
+            has_bookings = db.execute(text("""
+                SELECT COUNT(*) FROM FlightClass fc
+                INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
+                INNER JOIN BookingItem bi ON bi.flight_price_id = fp.flight_price_id
+                WHERE fc.flight_id = :flight_id AND fc.class_id = :class_id
+            """), {"flight_id": flight_id, "class_id": class_id}).scalar()
+
+            if not has_bookings:
+                db.execute(text("""
+                    DELETE FROM FlightClass
+                    WHERE flight_id = :flight_id AND class_id = :class_id
+                """), {"flight_id": flight_id, "class_id": class_id})
+
+    for class_id in class_ids:
+        if class_id not in existing:
+            db.execute(text("""
+                INSERT INTO FlightClass (class_id, flight_id)
+                VALUES (:class_id, :flight_id)
+            """), {"class_id": class_id, "flight_id": flight_id})
+
+    db.commit()
+
+
+def update_flight_baggage(
+    db: Session,
+    flight_id: int,
+    baggage_options: list[dict],
+) -> None:
+    db.execute(text("""
+        DELETE FROM BaggagePricingInFlight
+        WHERE flight_id = :flight_id
+          AND baggage_pricing_in_flight_id NOT IN (
+              SELECT DISTINCT bpif.baggage_pricing_in_flight_id
+              FROM BaggagePricingInFlight bpif
+              INNER JOIN BookingBaggage bb 
+                  ON bb.baggage_pricing_in_flight_id = bpif.baggage_pricing_in_flight_id
+          )
+    """), {"flight_id": flight_id})
+
+    find_fc_sql = text("""
+        SELECT class_id, flight_class_id 
+        FROM FlightClass 
+        WHERE flight_id = :flight_id
+    """)
+    flight_classes = db.execute(
+        find_fc_sql, {"flight_id": flight_id}).mappings().all()
+    class_map = {row["class_id"]: row["flight_class_id"] 
+                 for row in flight_classes}
+
+    for opt in baggage_options:
+        flight_class_id = class_map.get(opt["class_id"])
+        if flight_class_id:
+            db.execute(text("""
+                INSERT INTO BaggagePricingInFlight
+                    (flight_id, baggage_pricing_rule_id, 
+                     flight_class_id, baggage_price)
+                VALUES
+                    (:flight_id, :rule_id, :flight_class_id, :price)
+            """), {
+                "flight_id": flight_id,
+                "rule_id": opt["baggage_pricing_rule_id"],
+                "flight_class_id": flight_class_id,
+                "price": opt["price"],
+            })
+
+    db.commit()
+
+
+def cancel_flight(db: Session, flight_id: int) -> bool:
+    status_id = get_status_id_by_name(db, "Cancelled")
+    if not status_id:
+        return False
+    
+    sql = text("""
+        UPDATE Flight 
+        SET flight_status_id = :status_id 
+        WHERE flight_id = :flight_id
+    """)
+    db.execute(sql, {"status_id": status_id, "flight_id": flight_id})
+    db.commit()
+    return True
+
+def update_flight_times(db: Session, flight_id: int, departs_datetime: str, arrives_datetime: str):
+    sql = text("""
+        UPDATE Flight 
+        SET departs_datetime = :dep, arrives_datetime = :arr
+        WHERE flight_id = :flight_id
+    """)
+    db.execute(sql, {
+        "dep": departs_datetime,
+        "arr": arrives_datetime,
+        "flight_id": flight_id
+    })
+    db.commit()
 
 

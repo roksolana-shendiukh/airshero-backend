@@ -167,5 +167,37 @@ def update_booking_passengers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("", status_code=200)
+def get_bookings(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+    skip: int = 0,
+    limit: int = 50,
+    status: str | None = None,
+    date_filter: str | None = 'this_month',
+):
+    return booking_service.get_bookings(
+        db, skip=skip, limit=limit,
+        status=status,
+        date_filter=date_filter,
+    )
+
+@router.post("/{booking_id}/cancel", status_code=200)
+def cancel_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("salesAgent")),
+):
+    try:
+        booking_service.cancel_booking(db, booking_id)
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
 
 

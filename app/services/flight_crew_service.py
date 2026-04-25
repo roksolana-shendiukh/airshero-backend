@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
+from fastapi import HTTPException
 from app.models.flight_crew_model import (
     FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation, FlightCrewPosition
 )
@@ -10,6 +11,10 @@ from app.models.flight_schedule_model import FlightSchedule
 from app.models.route_model import Route
 from app.models.airport_model import Airport
 from app.models.city_model import City
+from app.models.flight_crew_model import FlightCrewPosition, FlightCrewLicenseType
+
+
+
 
 PILOT_POSITION            = "Pilot"
 CO_PILOT_POSITION         = "Co-Pilot"
@@ -111,6 +116,7 @@ def get_available_crew(
     operation_id: int,
     airline_id: int,
     search: str | None = None,
+    position: str | None = 'Pilot',
 ) -> list[dict]:
     op = db.query(FlightOperation).filter(
         FlightOperation.flight_operation_id == operation_id
@@ -119,7 +125,8 @@ def get_available_crew(
         return []
 
     results = flight_crew_repository.get_available_crew(
-        db, operation_id, op.airfleet_id, airline_id, search=search
+        db, operation_id, op.airfleet_id, airline_id,
+        search=search, position=position,
     )
 
     return [
@@ -185,8 +192,9 @@ def assign_crew(db: Session, operation_id: int, crew_id: int, airline_id: int) -
         raise ValueError("Operation not found")
 
     available = flight_crew_repository.get_available_crew(
-        db, operation_id, op.airfleet_id, airline_id
-    )
+            db, operation_id, op.airfleet_id, airline_id,
+            position=None,
+        )
     if not any(c.flight_crew_id == crew_id for c, _ in available):
         raise ValueError(
             "Crew member is not certified for this aircraft, "
@@ -231,3 +239,117 @@ def remove_crew(db: Session, operation_id: int, crew_id: int) -> bool:
     if result:
         db.commit()
     return result
+
+def get_all_crew(
+    db:       Session,
+    search:   str | None = None,
+    position: str | None = None,
+) -> list[dict]:
+    crew = flight_crew_repository.get_all_crew(db, search, position)
+    return [flight_crew_repository.crew_to_dto(c) for c in crew]
+
+
+def get_crew_by_id(db: Session, crew_id: int) -> dict:
+    c = flight_crew_repository.get_crew_by_id(db, crew_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Crew member not found")
+    return flight_crew_repository.crew_to_dto(c)
+
+
+
+def validate_position_license_logic(db: Session, position_id: int, license_type_id: int):
+    pos = db.query(FlightCrewPosition).filter(FlightCrewPosition.flight_crew_position_id == position_id).first()
+    lic = db.query(FlightCrewLicenseType).filter(FlightCrewLicenseType.flight_crew_license_type_id == license_type_id).first()
+
+    if not pos or not lic:
+        raise HTTPException(status_code=400, detail="Invalid Position or License Type ID")
+
+    pos_name = pos.flight_crew_position_name
+    lic_name = lic.flight_crew_license_type_name
+
+    if pos_name in [PILOT_POSITION, CO_PILOT_POSITION]:
+        pilot_licenses = ["Private Pilot License", "Commercial Pilot License", "Airline Transport Pilot License"]
+        if lic_name not in pilot_licenses:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"{pos_name} must have a valid Pilot License (PPL, CPL, or ATPL)."
+            )
+
+    if pos_name == ENGINEER_POSITION:
+        if lic_name != "Flight Engineer License":
+            raise HTTPException(
+                status_code=400, 
+                detail="Engineers must have a Flight Engineer License."
+            )
+
+    if pos_name == FLIGHT_ATTENDANT_POSITION:
+        pass
+
+
+def create_crew(
+    db:               Session,
+    first_name:       str,
+    last_name:        str,
+    position_id:      int,
+    license_type_id:  int,
+    experience_years: int,
+) -> dict:
+    validate_position_license_logic(db, position_id, license_type_id)
+    
+    if experience_years < 0 or experience_years > 60:
+        raise HTTPException(status_code=400, detail="Experience years must be between 0 and 60")
+
+    crew = flight_crew_repository.create_crew(
+        db, first_name, last_name, position_id, license_type_id, experience_years
+    )
+    db.commit()
+    fresh = flight_crew_repository.get_crew_by_id(db, crew.flight_crew_id)
+    return flight_crew_repository.crew_to_dto(fresh)
+
+
+def update_crew(
+    db:               Session,
+    crew_id:          int,
+    first_name:       str | None,
+    last_name:        str | None,
+    position_id:      int | None,
+    license_type_id:  int | None,
+    experience_years: int | None,
+) -> dict:
+    c = flight_crew_repository.get_crew_by_id(db, crew_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Crew member not found")
+
+    new_pos = position_id if position_id is not None else c.flight_crew_position_id
+    new_lic = license_type_id if license_type_id is not None else c.flight_crew_license_type_id
+    
+    validate_position_license_logic(db, new_pos, new_lic)
+
+    flight_crew_repository.update_crew(
+        db, c, first_name, last_name, position_id, license_type_id, experience_years
+    )
+    db.commit()
+    fresh = flight_crew_repository.get_crew_by_id(db, crew_id)
+    return flight_crew_repository.crew_to_dto(fresh)
+
+
+def delete_crew(db: Session, crew_id: int) -> None:
+    c = flight_crew_repository.get_crew_by_id(db, crew_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Crew member not found")
+    flight_crew_repository.delete_crew(db, c)
+    db.commit()
+
+
+def get_positions(db: Session) -> list[dict]:
+    rows = flight_crew_repository.get_positions(db)
+    return [{"id": r.flight_crew_position_id, "name": r.flight_crew_position_name} for r in rows]
+
+
+def get_license_types(db: Session) -> list[dict]:
+    rows = flight_crew_repository.get_license_types(db)
+    return [{"id": r.flight_crew_license_type_id, "name": r.flight_crew_license_type_name} for r in rows]
+
+
+
+

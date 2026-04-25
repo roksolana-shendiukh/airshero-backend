@@ -203,3 +203,29 @@ def complete(
         flight_operation_state_id=actual_state_id,
     )
     return update(db, operation_id, data, uid=uid, clear_on_terminal=True)
+
+
+def change_gate(db: Session, operation_id: int, new_gate_id: int):
+    op = flight_operation_repository.get_by_id(db, operation_id)
+    if not op:
+        return None
+    
+    if op.boarding_start_time is not None:
+        raise ValueError("Cannot change gate: boarding has already started")
+    
+    update_data = FlightOperationUpdateDTO(gate_id=new_gate_id)
+    
+    flight_operation_repository.update(db, op, update_data)
+    
+    db.commit()
+    
+    fresh_op = flight_operation_repository.get_by_id(db, operation_id)
+    return _map(fresh_op)
+
+
+
+
+
+
+
+

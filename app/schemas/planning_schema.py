@@ -12,6 +12,9 @@ class CreateFlightDTO(BaseModel):
     arrivesDatetime: str
     classPrices: list[ClassPriceDTO]
 
+class ConfigureFlightDTO(BaseModel):
+    classPrices: list[ClassPriceDTO]
+
 
 class FlightBaggageOptionDTO(BaseModel):
     classId: int
@@ -26,7 +29,6 @@ class AddFlightBaggageDTO(BaseModel):
 class ScheduleGroupDTO(BaseModel):
     dayIds: list[int]
     departureTime: str
-    arrivalTime: str
 
 
 class CreateRouteDTO(BaseModel):
@@ -44,6 +46,12 @@ class CreateScheduleDTO(BaseModel):
     flightStartDate: str
     flightEndDate: str
 
+
+class ConfirmFlightsDTO(BaseModel):
+    flightIds: list[int]
+
+class UpdateFlightClassesDTO(BaseModel):
+    classIds: list[int]
 
 
     
