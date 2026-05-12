@@ -24,4 +24,5 @@ class Terminal(Base):
     )
 
     terminal_type = relationship("TerminalType")
-    gates         = relationship("Gate")
+    gates = relationship("Gate", back_populates="terminal", cascade="all, delete-orphan")
+    airport = relationship("Airport", back_populates="terminals")

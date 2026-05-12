@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
 from app.repositories import planning_repository
+from datetime import datetime, timedelta
+from fastapi import HTTPException 
 
 
 def get_overview_flights(
@@ -576,5 +578,50 @@ def update_flight_baggage(
     planning_repository.update_flight_baggage(db, flight_id, baggage_options)
     return {"flightId": flight_id, "updated": True}
 
+
+def cancel_flight(db: Session, flight_id: int):
+    return planning_repository.cancel_flight(db, flight_id)
+
+
+def update_flight_times(db: Session, flight_id: int, departs_iso: str, arrives_iso: str) -> dict:
+    new_dep = datetime.fromisoformat(departs_iso)
+    new_arr = datetime.fromisoformat(arrives_iso)
+    new_duration = new_arr - new_dep
+
+    if new_duration.total_seconds() <= 0:
+        raise HTTPException(status_code=400, detail="Arrival must be after departure.")
+
+    flight_info = planning_repository.get_flight_reschedule_data(db, flight_id)
+    if not flight_info:
+        raise HTTPException(status_code=404, detail="Flight not found.")
+
+    min_dur = flight_info['flight_duration']
+    min_timedelta = timedelta(hours=min_dur.hour, minutes=min_dur.minute)
+    
+    if new_duration < min_timedelta:
+        readable_dur = min_dur.strftime('%H:%M')
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Impossible duration. Route requires at least {readable_dur}."
+        )
+
+    conflict = planning_repository.find_aircraft_overlap(
+        db, 
+        airfleet_id=flight_info['airfleet_id'], 
+        flight_id=flight_id, 
+        start=new_dep, 
+        end=new_arr
+    )
+    
+    if conflict:
+         raise HTTPException(
+             status_code=400, 
+             detail=f"Aircraft conflict! Assigned to flight {conflict['flight_number']} at this time."
+         )
+
+    planning_repository.update_flight_datetimes(db, flight_id, new_dep, new_arr)
+    db.commit()
+
+    return {"flightId": flight_id, "updated": True}
 
 

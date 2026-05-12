@@ -141,7 +141,7 @@ def get_flights_without_operation(db: Session, airline_id: int):
     WHERE fo.flight_id IS NULL
       AND al.airline_id = :airline_id
       AND f.departs_datetime > GETDATE()
-      AND f.departs_datetime <= DATEADD(HOUR, 12, GETDATE())
+      AND f.departs_datetime <= DATEADD(HOUR, 60, GETDATE())
       AND fs.flight_status_name = 'Scheduled'
     ORDER BY f.departs_datetime ASC
     """)

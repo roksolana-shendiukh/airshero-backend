@@ -13,5 +13,7 @@ class Airport(Base):
     airport_code    = Column(String, unique=True)
     latitude        = Column(Numeric(9, 6))
     longitude       = Column(Numeric(9, 6))
+    
 
     city = relationship("City")
+    terminals = relationship("Terminal", back_populates="airport")

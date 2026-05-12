@@ -75,7 +75,6 @@ def generate_ticket_pdf_for_passenger(
 
     is_multi_segment = flight_info_2 is not None
 
-    # Заголовок
     pdf.set_font("Helvetica", 'B', 14)
     pdf.set_text_color(40, 40, 40)
     pdf.cell(100, 10, "E-TICKET CONFIRMATION", ln=False)

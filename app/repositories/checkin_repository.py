@@ -95,7 +95,7 @@ def get_active_flights_for_agent(db: Session, airport_id: int, airline_id: int |
         LEFT JOIN Terminal t       ON t.terminal_id = g.terminal_id
         WHERE ap_dep.airport_id = :airport_id
             AND f.departs_datetime >= GETDATE()
-            AND f.departs_datetime <= DATEADD(hour, 12, GETDATE())
+            AND f.departs_datetime <= DATEADD(hour, 60, GETDATE())
             AND (
                 fos.flight_operation_status_name IN ('Waiting', 'Boarding')
                 OR fo.flight_operation_id IS NULL
@@ -529,6 +529,7 @@ def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
             p.passenger_first_name,
             p.passenger_last_name,
             CAST(sl.seat_layout_rows AS VARCHAR) + sl.seat_layout_columns AS seat_position,
+            c.class_id, 
             c.class_name,
             bp.boarding_pass_issue_date_time,
             bp.flight_operation_id,
@@ -550,6 +551,7 @@ def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
             p.passenger_last_name,
             sl.seat_layout_rows,
             sl.seat_layout_columns,
+            c.class_id, 
             c.class_name,
             bp.boarding_pass_issue_date_time,
             bp.flight_operation_id
@@ -564,6 +566,7 @@ def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
             "ticketNumber":      r["boarding_pass_ticket_number"],
             "passengerName":     f"{r['passenger_first_name']} {r['passenger_last_name']}",
             "seat":              r["seat_position"],
+            "classId":           r["class_id"], 
             "className":         r["class_name"],
             "issuedAt":          str(r["boarding_pass_issue_date_time"]),
             "flightOperationId": r["flight_operation_id"],

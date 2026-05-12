@@ -212,7 +212,7 @@ def set_timeline_step_force(
     operation_id: int,
     step: str,
     db: Session = Depends(get_db),
-    user=Depends(require_role("flightOperator")),
+    user=Depends(require_any_role("flightOperator", "checkInAgent")),
 ):
     if step not in _TIMELINE_FIELDS:
         raise HTTPException(status_code=400, detail=f"Unknown step '{step}'")

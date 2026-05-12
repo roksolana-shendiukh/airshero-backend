@@ -14,4 +14,4 @@ class Gate(Base):
         UniqueConstraint("terminal_id", "gate_code"),
     )
 
-    terminal = relationship("Terminal")
+    terminal = relationship("Terminal", back_populates="gates")

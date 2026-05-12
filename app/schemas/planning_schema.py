@@ -54,4 +54,9 @@ class UpdateFlightClassesDTO(BaseModel):
     classIds: list[int]
 
 
-    
+class UpdateFlightTimesDTO(BaseModel):
+    departsDatetime: str  
+    arrivesDatetime: str  
+
+
+

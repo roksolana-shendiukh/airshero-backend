@@ -109,7 +109,7 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
             target_lat, target_lon,
             float(a["latitude"]), float(a["longitude"]),
         )
-        if dist <= 250.0 and a["city_id"] in valid_direct_destinations:
+        if dist <= 100.0 and a["city_id"] in valid_direct_destinations:
             nearby_cities.append({
                 "cityId":     a["city_id"],
                 "cityName":   a["city_name"],

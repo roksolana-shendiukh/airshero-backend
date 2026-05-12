@@ -1,7 +1,4 @@
-"""
-Запуск: python clear_operation_claim.py <uid>
-Приклад: python clear_operation_claim.py hIpoJdgOvJOM2hyRKkC2Ag1JpLn1
-"""
+
 import sys
 import firebase_admin
 from firebase_admin import auth, credentials

@@ -11,7 +11,8 @@ from app.schemas.planning_schema import (
     CreateScheduleDTO,
     ConfigureFlightDTO,
     UpdateFlightClassesDTO,
-    ConfirmFlightsDTO
+    ConfirmFlightsDTO,
+    UpdateFlightTimesDTO 
 )
 
 router = APIRouter(prefix="/planning", tags=["Planning"])
@@ -344,8 +345,6 @@ def update_flight_prices(
     )
 
 
-
-
 @router.get("/pricing/routes")
 def get_routes_with_pricing_flights(
     db: Session = Depends(get_db),
@@ -393,5 +392,54 @@ def update_flight_classes(
 ):
     return planning_service.update_flight_classes(
         db, flight_id, body.classIds)
+
+
+@router.post("/flights/{flight_id}/cancel")
+def cancel_flight(
+    flight_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    airline_id = user.get("airlineId")
+    try:
+        planning_service.cancel_flight(db, flight_id)
+        return {"status": "success", "message": "Flight cancelled"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/flights/{flight_id}/times")
+def update_flight_times(
+    flight_id: int,
+    body: UpdateFlightTimesDTO,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("planningManager")),
+):
+    try:
+        planning_service.update_flight_times(
+            db, 
+            flight_id=flight_id, 
+            departs_iso=body.departsDatetime, 
+            arrives_iso=body.arrivesDatetime
+        )
+        return {"status": "success"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/flights/{flight_id}/times")
+def update_flight_times(flight_id: int, body: UpdateFlightTimesDTO, db: Session = Depends(get_db)):
+    try:
+        planning_service.update_flight_times(db, flight_id, body.departsDatetime, body.arrivesDatetime)
+        return {"status": "updated"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+
+
+
+
 
 

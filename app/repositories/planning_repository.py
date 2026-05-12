@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import random
 
 
@@ -48,7 +48,13 @@ def get_overview_flights(
             fs.flight_status_name,
             af.aircraft_model,
             af.seat_capacity,
-            STRING_AGG(c.class_name, ', ') WITHIN GROUP (ORDER BY c.class_name) AS classes,
+            -- ВИПРАВЛЕННЯ: Використовуємо підзапит для отримання унікальних класів
+            (
+                SELECT STRING_AGG(c_sub.class_name, ', ') WITHIN GROUP (ORDER BY c_sub.class_name)
+                FROM FlightClass fc_sub
+                JOIN Class c_sub ON fc_sub.class_id = c_sub.class_id
+                WHERE fc_sub.flight_id = f.flight_id
+            ) AS classes,
             COUNT(DISTINCT bi.booking_item_id) AS booked_seats
         FROM Flight f
         INNER JOIN FlightSchedule fsched ON f.flight_schedule_id = fsched.flight_schedule_id
@@ -58,9 +64,8 @@ def get_overview_flights(
         INNER JOIN Airport dep_air      ON r.departs_airport_id = dep_air.airport_id
         INNER JOIN Airport arr_air      ON r.arrives_airport_id = arr_air.airport_id
         INNER JOIN FlightStatus fs      ON f.flight_status_id = fs.flight_status_id
-        LEFT JOIN FlightClass fc       ON f.flight_id = fc.flight_id
-        INNER JOIN Class c              ON fc.class_id = c.class_id
-        INNER JOIN FlightPrice fp ON fc.flight_class_id = fp.flight_class_id
+        LEFT JOIN FlightClass fc        ON f.flight_id = fc.flight_id
+        LEFT JOIN FlightPrice fp        ON fc.flight_class_id = fp.flight_class_id
             AND fp.flight_published_date = (
                 SELECT MAX(fp2.flight_published_date)
                 FROM FlightPrice fp2
@@ -82,7 +87,6 @@ def get_overview_flights(
 
     result = db.execute(sql, params)
     return result.mappings().all()
-
 
 def get_overview_stats(db: Session, airline_id: int):
     sql = text("""
@@ -1197,31 +1201,97 @@ def update_flight_baggage(
     db.commit()
 
 
-def cancel_flight(db: Session, flight_id: int) -> bool:
-    status_id = get_status_id_by_name(db, "Cancelled")
-    if not status_id:
-        return False
-    
-    sql = text("""
-        UPDATE Flight 
-        SET flight_status_id = :status_id 
-        WHERE flight_id = :flight_id
-    """)
-    db.execute(sql, {"status_id": status_id, "flight_id": flight_id})
-    db.commit()
-    return True
+def cancel_flight(db: Session, flight_id: int):
+    cancelled_id = get_status_id_by_name(db, "Cancelled")
+    if not cancelled_id:
+        raise ValueError("Status 'Cancelled' does not exist in database")
 
-def update_flight_times(db: Session, flight_id: int, departs_datetime: str, arrives_datetime: str):
+    sql = text("UPDATE Flight SET flight_status_id = :sid WHERE flight_id = :fid")
+    db.execute(sql, {"sid": cancelled_id, "fid": flight_id})
+    db.commit()
+
+
+def get_flight_route_details(db: Session, flight_id: int):
+    sql = text("""
+        SELECT r.flight_duration 
+        FROM Route r
+        INNER JOIN FlightSchedule fs ON r.route_id = fs.route_id
+        INNER JOIN Flight f ON fs.flight_schedule_id = f.flight_schedule_id
+        WHERE f.flight_id = :flight_id
+    """)
+    return db.execute(sql, {"flight_id": flight_id}).mappings().one_or_none()
+
+
+def update_flight_datetimes(db: Session, flight_id: int, departs: str, arrives: str):
     sql = text("""
         UPDATE Flight 
         SET departs_datetime = :dep, arrives_datetime = :arr
         WHERE flight_id = :flight_id
     """)
-    db.execute(sql, {
-        "dep": departs_datetime,
-        "arr": arrives_datetime,
-        "flight_id": flight_id
-    })
+    db.execute(sql, {"dep": departs, "arr": arrives, "flight_id": flight_id})
     db.commit()
+
+
+def check_aircraft_overlap(db: Session, airfleet_id: int, flight_id: int, start: datetime, end: datetime):
+    sql = text("""
+        SELECT f.flight_id, r.flight_number 
+        FROM Flight f
+        INNER JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        INNER JOIN Route r ON fs.route_id = r.route_id
+        INNER JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE r.airfleet_id = :airfleet_id
+          AND f.flight_id != :flight_id
+          AND fst.flight_status_name != 'Cancelled'
+          AND f.departs_datetime < :end_time
+          AND f.arrives_datetime > :start_time
+    """)
+    return db.execute(sql, {
+        "airfleet_id": airfleet_id,
+        "flight_id": flight_id,
+        "start_time": start,
+        "end_time": end
+    }).mappings().first()
+
+
+def get_flight_reschedule_data(db: Session, flight_id: int):
+    sql = text("""
+        SELECT r.airfleet_id, r.flight_duration, r.flight_number
+        FROM Route r
+        JOIN FlightSchedule fs ON r.route_id = fs.route_id
+        JOIN Flight f ON fs.flight_schedule_id = f.flight_schedule_id
+        WHERE f.flight_id = :flight_id
+    """)
+    return db.execute(sql, {"flight_id": flight_id}).mappings().one_or_none()
+
+def find_aircraft_overlap(db: Session, airfleet_id: int, flight_id: int, start: datetime, end: datetime):
+    sql = text("""
+        SELECT f.flight_id, r.flight_number 
+        FROM Flight f
+        JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
+        JOIN Route r ON fs.route_id = r.route_id
+        JOIN FlightStatus fst ON f.flight_status_id = fst.flight_status_id
+        WHERE r.airfleet_id = :airfleet_id
+          AND f.flight_id != :flight_id
+          AND fst.flight_status_name NOT IN ('Cancelled')
+          AND f.departs_datetime < :end_time
+          AND f.arrives_datetime > :start_time
+    """)
+    return db.execute(sql, {
+        "airfleet_id": airfleet_id,
+        "flight_id": flight_id,
+        "start_time": start,
+        "end_time": end
+    }).mappings().first()
+
+def update_flight_datetimes(db: Session, flight_id: int, departs: datetime, arrives: datetime):
+    sql = text("""
+        UPDATE Flight 
+        SET departs_datetime = :dep, arrives_datetime = :arr
+        WHERE flight_id = :flight_id
+    """)
+    db.execute(sql, {"dep": departs, "arr": arrives, "flight_id": flight_id})
+    db.commit()
+
+
 
 

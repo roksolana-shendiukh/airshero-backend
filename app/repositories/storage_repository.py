@@ -11,7 +11,8 @@ def list_files(prefix: str) -> list[str]:
     for blob in blobs:
         if blob.name.endswith("/"):
             continue
-        encoded = blob.name.replace("/", "%2F")
+        import urllib.parse
+        encoded = urllib.parse.quote(blob.name, safe='')
         url = f"https://firebasestorage.googleapis.com/v0/b/{bucket.name}/o/{encoded}?alt=media"
         urls.append(url)
     

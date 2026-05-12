@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from app.database import get_db
 from app.dependencies.auth import require_role
@@ -46,6 +47,19 @@ def update_role(
     return {"message": "Role updated successfully"}
 
 
+@router.delete("/users/{uid}")  
+def delete_user(
+    uid: str,
+    user=Depends(require_role("systemAdmin")),
+):
+    try:
+        from firebase_admin import auth
+        auth.delete_user(uid)
+        return {"message": "User deleted successfully"}
+    except Exception as e:        
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.patch("/users/{uid}/status")
 def update_status(
     uid: str,
@@ -84,3 +98,6 @@ def list_airlines(
         {"airlineId": a.airline_id, "airlineName": a.airline_name}
         for a in airlines
     ]
+
+
+

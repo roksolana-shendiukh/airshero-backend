@@ -22,7 +22,7 @@ def get_airfleets(
 def get_airfleet_photos(
     airfleet_id: int,
     db: Session = Depends(get_db),
-    user=Depends(require_any_role("flightOperator", "salesAgent", "systemAdmin")),
+    user=Depends(require_any_role("flightOperator", "planningManager", "systemAdmin")),
 ):
     return storage_service.get_airfleet_photos(db, airfleet_id)
 
