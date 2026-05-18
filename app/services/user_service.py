@@ -1,14 +1,18 @@
 from firebase_admin import auth
 from firebase_admin.exceptions import FirebaseError
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
 import re
 import secrets
 import string
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
+from datetime import datetime
 from app.config import settings
+from app.models.airline_model import Airline
+from app.controllers.airline_controller import get_airline_logo_url
+from app.database import SessionLocal
 
 
 ID_TO_ROLE = {
@@ -112,12 +116,26 @@ def _validate_name(value: str, field: str) -> str:
         }])
     return value
 
-def create_user(email: str, first_name: str, last_name: str, airline_name: str, role_id: int):
+def create_user(
+    email: str,
+    first_name: str,
+    last_name: str,
+    airline_name: str,
+    role_id: int,
+    agent_id: int | None = None, 
+    airline_id: int | None = None,
+):
     role = ID_TO_ROLE.get(role_id)
     if not role or role == "systemAdmin":
         raise HTTPException(status_code=422, detail=[{
             "loc": ["body", "roleId"],
             "msg": "Invalid role"
+        }])
+
+    if role == "checkInAgent" and not agent_id:
+        raise HTTPException(status_code=422, detail=[{
+            "loc": ["body", "agentId"],
+            "msg": "agentId is required for checkInAgent role"
         }])
 
     first_name = _validate_name(first_name, "firstName")
@@ -140,7 +158,17 @@ def create_user(email: str, first_name: str, last_name: str, airline_name: str, 
         pass
 
     temp_password = _generate_temp_password()
-    temp_password_created_at = datetime.now(timezone.utc).isoformat()
+    temp_password_created_at = datetime.now().isoformat()
+
+    logo_url = None
+    if airline_id:
+        db = SessionLocal() 
+        try:
+            airline = db.query(Airline).filter(Airline.airline_id == airline_id).first()
+            if airline:
+                logo_url = get_airline_logo_url(airline.airline_url)
+        finally:
+            db.close()
 
     try:
         user = auth.create_user(
@@ -148,14 +176,25 @@ def create_user(email: str, first_name: str, last_name: str, airline_name: str, 
             password=temp_password,
             display_name=f"{first_name} {last_name}"
         )
-        auth.set_custom_user_claims(user.uid, {
+
+        claims = {
             "firstName": first_name,
             "lastName": last_name,
             "airlineName": airline_name.strip(),
+            "airlineLogoUrl": logo_url,
             "role": role,
             "status": "pendingPasswordChange",
             "tempPasswordCreatedAt": temp_password_created_at,
-        })
+        }
+
+        if role == "checkInAgent" and agent_id:
+            claims["agentId"] = agent_id
+        
+        if airline_id:                         
+            claims["airlineId"] = airline_id 
+
+        auth.set_custom_user_claims(user.uid, claims)
+        print(f"DEBUG: Created user with logo: {logo_url}")
 
         _send_welcome_email(email, first_name, role, temp_password)
 
@@ -173,6 +212,64 @@ def create_user(email: str, first_name: str, last_name: str, airline_name: str, 
         }])
     except FirebaseError as e:
         raise HTTPException(status_code=503, detail=f"Firebase service unavailable: {str(e)}")
+
+def update_profile(
+    uid: str,
+    first_name: str | None,
+    last_name: str | None,
+    email: str | None,
+) -> dict:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+
+    update_kwargs = {}
+
+    if first_name:
+        first_name = _validate_name(first_name, "firstName")
+        claims["firstName"] = first_name
+        update_kwargs["display_name"] = f"{first_name} {claims.get('lastName', '')}"
+
+    if last_name:
+        last_name = _validate_name(last_name, "lastName")
+        claims["lastName"] = last_name
+        update_kwargs["display_name"] = (
+            f"{claims.get('firstName', '')} {last_name}"
+        )
+
+    if email:
+        email = email.strip()
+        if len(email) > 45:
+            raise HTTPException(status_code=422, detail=[{
+                "loc": ["body", "email"],
+                "msg": "Email must be at most 45 characters"
+            }])
+        try:
+            existing = auth.get_user_by_email(email)
+            if existing.uid != uid:
+                raise HTTPException(status_code=422, detail=[{
+                    "loc": ["body", "email"],
+                    "msg": "Email already in use"
+                }])
+        except auth.UserNotFoundError:
+            pass
+        update_kwargs["email"] = email
+
+    if update_kwargs:
+        auth.update_user(uid, **update_kwargs)
+
+    auth.set_custom_user_claims(uid, claims)
+
+    return {"uid": uid, "updated": True}
+
+
+def update_profile_photo(uid: str, photo_url: str) -> dict:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+    claims["avatarUrl"] = photo_url
+    auth.update_user(uid, photo_url=photo_url)
+    auth.set_custom_user_claims(uid, claims)
+    return {"uid": uid, "avatarUrl": photo_url}
+
 
 def set_role(uid: str, role_id: int):
     role = ID_TO_ROLE.get(role_id)
@@ -202,7 +299,7 @@ def check_temp_password_expired(uid: str):
     if not created_at_str:
         return True
     created_at = datetime.fromisoformat(created_at_str)
-    elapsed = (datetime.now(timezone.utc) - created_at).total_seconds()
+    elapsed = (datetime.now() - created_at).total_seconds()
     if elapsed > 40 * 60:
         auth.update_user(uid, disabled=True)
         claims["status"] = "tempPasswordExpired"
@@ -243,3 +340,31 @@ def _validate_password(password: str) -> str:
         }])
     return password
 
+def set_operation(uid: str, operation_id: int | None) -> None:
+    user = auth.get_user(uid)
+    claims = user.custom_claims or {}
+    if operation_id is not None:
+        claims["operationId"] = operation_id
+    else:
+        claims.pop("operationId", None)
+    auth.set_custom_user_claims(uid, claims)
+
+def update_user_claims_with_airline(uid: str, airline_id: int, db: Session):
+    airline = db.query(Airline).filter(Airline.airline_id == airline_id).first()
+    
+    if not airline:
+        return
+
+    logo_url = get_airline_logo_url(airline.airline_url)
+    
+    user = auth.get_user(uid)
+    current_claims = user.custom_claims or {}
+
+    new_claims = {
+        **current_claims,
+        "airlineId": airline_id,
+        "airlineName": airline.airline_name,
+        "airlineLogoUrl": logo_url
+    }
+
+    auth.set_custom_user_claims(uid, new_claims)

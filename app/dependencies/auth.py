@@ -28,3 +28,14 @@ def require_role(role: str):
             )
         return user
     return checker
+
+def require_any_role(*roles: str):
+    def checker(user: dict = Depends(get_current_user)):
+        user_role = user.get("role")
+        if user_role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission"
+            )
+        return user
+    return checker
