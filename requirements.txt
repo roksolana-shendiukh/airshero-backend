@@ -1,0 +1,14 @@
+apscheduler==3.11.2
+fastapi==0.136.1
+firebase_admin==7.1.0
+fpdf2==2.8.7
+pydantic==2.13.4
+pydantic_settings==2.14.1
+pyrebase4==4.9.0
+python_dateutil==2.9.0.post0
+SQLAlchemy==2.0.49
+uvicorn==0.40.0
+pymssql==2.3.13
+python-dotenv==1.2.1
+python-multipart==0.0.22
+
