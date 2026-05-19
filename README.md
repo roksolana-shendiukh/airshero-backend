@@ -47,4 +47,4 @@ Follows a layered architecture: Controllers → Services → Repositories → OR
 ## Related Repositories
 
 - [AirShero Frontend](https://github.com/roksolana-shendiukh/airshero-frontend)
-- [AirShero Database](посилання)
+- [AirShero Database](https://github.com/roksolana-shendiukh/airshero-db)
