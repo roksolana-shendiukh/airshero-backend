@@ -48,3 +48,4 @@ Follows a layered architecture: Controllers → Services → Repositories → OR
 
 - [AirShero Frontend](https://github.com/roksolana-shendiukh/airshero-frontend)
 - [AirShero Database](https://github.com/roksolana-shendiukh/airshero-db)
+- [AirShero Data Generatore](https://github.com/roksolana-shendiukh/airshero-datagenerator)
