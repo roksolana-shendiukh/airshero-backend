@@ -2,36 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.services.system_service import record_snapshot
+from app.interfaces.api.v1.routes import admin_controller, airfleet_controller, airfleet_crud_controller, airline_controller, airport_controller, analytics_controller, auth_controller, baggage_controller, booking_controller, checkin_controller, city_controller, crew_controller, flight_controller, flight_crew_controller, flight_operation_controller, gate_controller, object_crud_controller, passenger_controller, planning_controller, reference_controller, reference_crud_controller, route_controller
+from app.core.services.system_service import record_snapshot
 from contextlib import asynccontextmanager
 
 
 
 from app.database import engine
-from app.controllers import (
-    auth_controller,
-    admin_controller,
-    passenger_controller,
-    booking_controller,
-    baggage_controller,
-    city_controller,
-    flight_controller,
-    reference_controller,
-    checkin_controller,
-    airport_controller,
-    route_controller,
-    flight_operation_controller,
-    gate_controller,
-    airfleet_controller,
-    flight_crew_controller,
-    planning_controller,
-    airline_controller,
-    analytics_controller,
-    user_controller,
-    crew_controller,
-    object_crud_controller,
-    reference_crud_controller,
-    airfleet_crud_controller
+from app.interfaces.api.v1.routes import (
+    user_controller
 )
 
 scheduler = BackgroundScheduler()
