@@ -4,7 +4,7 @@ from app.infrastructure.database.models.checkin_model import CheckInAgent
 
 
 def get_all_users() -> list[dict]:
-    from app.core.services.user_service import get_all_users as _get_all
+    from app.core.use_cases.user_service import get_all_users as _get_all
     return _get_all()
 
 
@@ -17,7 +17,7 @@ def create_user(
     agent_id: int | None,
     airline_id: int | None = None,
 ) -> dict:
-    from app.core.services.user_service import create_user as _create
+    from app.core.use_cases.user_service import create_user as _create
     return _create(
         email=email,
         first_name=first_name,
@@ -30,12 +30,12 @@ def create_user(
 
 
 def set_role(uid: str, role_id: int) -> None:
-    from app.core.services.user_service import set_role as _set_role
+    from app.core.use_cases.user_service import set_role as _set_role
     _set_role(uid, role_id)
 
 
 def set_status(uid: str, status: str) -> None:
-    from app.core.services.user_service import set_status as _set_status
+    from app.core.use_cases.user_service import set_status as _set_status
     _set_status(uid, status)
 
 
@@ -70,7 +70,7 @@ def get_unassigned_checkin_agents(db: Session) -> list[dict]:
 
 
 def set_operation(uid: str, operation_id: int | None) -> None:
-    from app.core.services.user_service import set_operation as _set_operation
+    from app.core.use_cases.user_service import set_operation as _set_operation
     _set_operation(uid, operation_id)
 
     
