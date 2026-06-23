@@ -1,15 +1,15 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy import text, or_
+from datetime import date, datetime, timedelta
+
 from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.flight_model import Flight, FlightStatus
-from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
-from app.infrastructure.database.models.route_model import Route
-from app.infrastructure.database.models.flight_model import Flight
-from app.infrastructure.database.models.route_model import Route
-from datetime import date
-from sqlalchemy import or_
-from datetime import datetime, timedelta
+from app.infrastructure.database.models.flight_model import Flight, Route
+from app.infrastructure.database.models.flight_operation_model import (
+    ScheduledFlight, FlightStatus
+)
+from app.infrastructure.database.models.flight_schedule_model import (
+    FlightSchedule, FlightSeason
+)
 
 
 _SEARCH_CITIES = text("""
@@ -38,47 +38,60 @@ def search_cities(db: Session, query: str) -> list:
     }).fetchall()
 
 
+def _base_scheduled_query(db: Session):
+    """
+    Базовий join-ланцюжок який використовується в кількох функціях:
+    ScheduledFlight → Flight → Route → DepAirport / ArrAirport
+                   → FlightStatus
+    """
+    DepAirport = aliased(Airport, name="dep")
+    ArrAirport = aliased(Airport, name="arr")
+
+    q = (
+        db.query(ScheduledFlight, DepAirport, ArrAirport)
+        .join(Flight, Flight.flight_id == ScheduledFlight.flight_id)
+        .join(Route, Route.route_id == Flight.route_id)
+        .join(DepAirport, DepAirport.airport_id == Route.departs_airport_id)
+        .join(ArrAirport, ArrAirport.airport_id == Route.arrives_airport_id)
+        .join(FlightStatus, FlightStatus.flight_status_id == ScheduledFlight.flight_status_id)
+    )
+    return q, DepAirport, ArrAirport
+
+
 def get_alternative_destinations(db: Session, from_city_id: int) -> list:
+    today = date.today()
+    q, DepAirport, ArrAirport = _base_scheduled_query(db)
+
     return (
-        db.query(
-            Airport.city_id.label("city_id"),
+        q.with_entities(ArrAirport.city_id.label("city_id"))
+        .filter(
+            DepAirport.city_id == from_city_id,
+            FlightStatus.flight_status_name != "Cancelled",
+            ScheduledFlight.departs_date >= today,
         )
-        .join(Route, Route.arrives_airport_id == Airport.airport_id)
-        .join(FlightSchedule, FlightSchedule.route_id == Route.route_id)
-        .join(Flight, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
-        .join(Airport.__table__.alias("dep"), text("dep.airport_id = Route.departs_airport_id"))
-        .filter(text("dep.city_id = :from_id").bindparams(from_id=from_city_id))
         .distinct()
         .all()
     )
 
 
-
-
-def get_available_flight_dates(db: Session, from_city_id: int, to_city_id: int) -> list:
-    DepAirport = aliased(Airport)
-    ArrAirport = aliased(Airport)
+def get_available_flight_dates(
+    db: Session,
+    from_city_id: int,
+    to_city_id: int,
+) -> list:
     today = date.today()
+    q, DepAirport, ArrAirport = _base_scheduled_query(db)
 
     return (
-        db.query(Flight.departs_datetime)
-        .join(FlightSchedule, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
-        .join(Route, FlightSchedule.route_id == Route.route_id)
-        .join(DepAirport, DepAirport.airport_id == Route.departs_airport_id)
-        .join(ArrAirport, ArrAirport.airport_id == Route.arrives_airport_id)
-        .join(FlightStatus, Flight.flight_status_id == FlightStatus.flight_status_id)
+        q.with_entities(ScheduledFlight.departs_date)
         .filter(
             DepAirport.city_id == from_city_id,
             ArrAirport.city_id == to_city_id,
-            FlightStatus.flight_status_name != 'Cancelled',
-            Flight.departs_datetime >= today,
-            or_(
-                FlightSchedule.flight_end_date.is_(None),
-                FlightSchedule.flight_end_date >= today,
-            ),
+            FlightStatus.flight_status_name != "Cancelled",
+            ScheduledFlight.departs_date >= today,
         )
         .distinct()
-        .order_by(Flight.departs_datetime)
+        .order_by(ScheduledFlight.departs_date)
         .all()
     )
 
@@ -89,39 +102,23 @@ def get_leg2_flight_dates(
     to_city_id: int,
     leg1_date: str,
 ) -> list:
-    DepAirport = aliased(Airport)
-    ArrAirport = aliased(Airport)
     today = date.today()
-
     leg1 = datetime.strptime(leg1_date, "%Y-%m-%d").date()
-    min_date = leg1
     max_date = leg1 + timedelta(days=1)
 
+    q, DepAirport, ArrAirport = _base_scheduled_query(db)
+
     return (
-        db.query(Flight.departs_datetime)
-        .join(FlightSchedule, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
-        .join(Route, FlightSchedule.route_id == Route.route_id)
-        .join(DepAirport, DepAirport.airport_id == Route.departs_airport_id)
-        .join(ArrAirport, ArrAirport.airport_id == Route.arrives_airport_id)
-        .join(FlightStatus, Flight.flight_status_id == FlightStatus.flight_status_id)
+        q.with_entities(ScheduledFlight.departs_date)
         .filter(
             DepAirport.city_id == hub_city_id,
             ArrAirport.city_id == to_city_id,
-            FlightStatus.flight_status_name != 'Cancelled',
-            Flight.departs_datetime >= datetime.combine(min_date, datetime.min.time()),
-            Flight.departs_datetime <= datetime.combine(max_date, datetime.max.time()),
-            or_(
-                FlightSchedule.flight_end_date.is_(None),
-                FlightSchedule.flight_end_date >= today,
-            ),
+            FlightStatus.flight_status_name != "Cancelled",
+            ScheduledFlight.departs_date >= leg1,
+            ScheduledFlight.departs_date <= max_date,
         )
         .distinct()
-        .order_by(Flight.departs_datetime)
+        .order_by(ScheduledFlight.departs_date)
         .all()
     )
-
-
-
-
-
 
