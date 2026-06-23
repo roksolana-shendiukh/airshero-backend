@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from app.infrastructure.database.models.payment_model import Payment, PaymentStatus, PaymentMethod
-
-from sqlalchemy import text
+from datetime import datetime
 
 
 def get_payment_status_id(db: Session, name: str) -> int:
@@ -25,19 +24,19 @@ def insert_payment(
     payment_status_id: int,
     payment_method_id: int,
     payment_amount: float,
-) -> None:
-    db.execute(
-        text("""
-            INSERT INTO Payment (booking_id, payment_status_id, payment_method_id, payment_date_time, payment_amount)
-            VALUES (:booking_id, :payment_status_id, :payment_method_id, GETDATE(), :payment_amount)
-        """),
-        {
-            "booking_id": booking_id,
-            "payment_status_id": payment_status_id,
-            "payment_method_id": payment_method_id,
-            "payment_amount": payment_amount,
-        }
+) -> Payment:
+    payment = Payment(
+        booking_id=booking_id,
+        payment_status_id=payment_status_id,
+        payment_method_id=payment_method_id,
+        payment_amount=payment_amount,
+        payment_date_time=datetime.utcnow(),
     )
+    db.add(payment)
+    db.flush()
+    return payment
+
+
 
 def get_total_paid(db: Session, booking_id: int, paid_status_id: int) -> float:
     result = (
