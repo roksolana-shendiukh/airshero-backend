@@ -1,9 +1,13 @@
+import logging
 import random
+from datetime import datetime
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
+
 from app.infrastructure.database.models.booking_model import Booking, BookingItem, BookingStatus
 from app.infrastructure.database.models.baggage_model import BaggageOptionInFlight
-from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def get_booking_status_id(db: Session, name: str) -> int:
@@ -80,13 +84,14 @@ def insert_baggage_option(
 def update_booking_status(db: Session, booking_id: int, booking_status_id: int) -> None:
     db.execute(
         text("UPDATE Booking SET booking_status_id = :status_id WHERE booking_id = :booking_id"),
-        {"status_id": booking_status_id, "booking_id": booking_id}
+        {"status_id": booking_status_id, "booking_id": booking_id},
     )
+
 
 def get_booking_by_id(db: Session, booking_id: int) -> Booking | None:
     return (
         db.query(Booking)
-        .options(joinedload(Booking.status))
+        .options(joinedload(Booking.booking_status))
         .filter(Booking.booking_id == booking_id)
         .first()
     )
@@ -131,12 +136,11 @@ def get_booking_flight_info_rows(db: Session, booking_id: int) -> list:
     return db.execute(text("""
         SELECT
             f.flight_id,
-            f.departs_datetime,
-            f.arrives_datetime,
-            dep_airport.airport_code AS dep_code,
-            dep_city.city_name       AS dep_city,
-            arr_airport.airport_code AS arr_code,
-            arr_city.city_name       AS arr_city,
+            sf.departs_date,
+            dep_airport.airport_code  AS dep_code,
+            dep_city.city_name        AS dep_city,
+            arr_airport.airport_code  AS arr_code,
+            arr_city.city_name        AS arr_city,
             p.passenger_first_name,
             p.passenger_last_name,
             c.class_name,
@@ -145,20 +149,22 @@ def get_booking_flight_info_rows(db: Session, booking_id: int) -> list:
             bpf.baggage_price,
             bpf.baggage_pricing_in_flight_id
         FROM BookingItem bi
-        JOIN FlightPrice fp          ON bi.flight_price_id = fp.flight_price_id
-        JOIN FlightClass fc          ON fp.flight_class_id = fc.flight_class_id
-        JOIN Class c                 ON fc.class_id = c.class_id
-        JOIN Flight f                ON fc.flight_id = f.flight_id
-        JOIN FlightSchedule fs       ON f.flight_schedule_id = fs.flight_schedule_id
-        JOIN Route r                 ON fs.route_id = r.route_id
-        JOIN Airport dep_airport     ON r.departs_airport_id = dep_airport.airport_id
-        JOIN City dep_city           ON dep_airport.city_id = dep_city.city_id
-        JOIN Airport arr_airport     ON r.arrives_airport_id = arr_airport.airport_id
-        JOIN City arr_city           ON arr_airport.city_id = arr_city.city_id
-        JOIN PassengerDocument pd    ON bi.passenger_document_id = pd.passenger_document_id
-        JOIN Passenger p             ON pd.passenger_id = p.passenger_id
-        LEFT JOIN BaggageOptionInFlight bof  ON bof.booking_item_id = bi.booking_item_id
-        LEFT JOIN BaggagePricingInFlight bpf ON bof.baggage_pricing_in_flight_id = bpf.baggage_pricing_in_flight_id
+        JOIN FlightPrice fp           ON bi.flight_price_id      = fp.flight_price_id
+        JOIN ScheduledFlight sf       ON fp.schedule_flight_id   = sf.schedule_flight_id
+        JOIN FlightClass fc           ON fp.flight_class_id      = fc.flight_class_id
+        JOIN Class c                  ON fc.class_id             = c.class_id
+        JOIN Flight f                 ON fc.flight_id            = f.flight_id
+        JOIN Route r                  ON f.route_id              = r.route_id
+        JOIN Airport dep_airport      ON r.departs_airport_id    = dep_airport.airport_id
+        JOIN City dep_city            ON dep_airport.city_id     = dep_city.city_id
+        JOIN Airport arr_airport      ON r.arrives_airport_id    = arr_airport.airport_id
+        JOIN City arr_city            ON arr_airport.city_id     = arr_city.city_id
+        JOIN PassengerDocument pd     ON bi.passenger_document_id = pd.passenger_document_id
+        JOIN Passenger p              ON pd.passenger_id         = p.passenger_id
+        LEFT JOIN BaggageOptionInFlight bof
+                                      ON bof.booking_item_id     = bi.booking_item_id
+        LEFT JOIN BaggagePricingInFlight bpf
+                                      ON bof.baggage_pricing_in_flight_id = bpf.baggage_pricing_in_flight_id
         WHERE bi.booking_id = :booking_id
     """), {"booking_id": booking_id}).fetchall()
 
@@ -185,37 +191,32 @@ def check_seat_availability(
     return True, "OK"
 
 
-def insert_booking_item_no_passenger(db: Session, booking_id: int, flight_price_id: int):
-    sql = text("""
+def insert_booking_item_no_passenger(db: Session, booking_id: int, flight_price_id: int) -> None:
+    db.execute(text("""
         INSERT INTO BookingItem (booking_id, flight_price_id)
         VALUES (:booking_id, :flight_price_id)
-    """)
-    db.execute(sql, {"booking_id": booking_id, "flight_price_id": flight_price_id})
+    """), {"booking_id": booking_id, "flight_price_id": flight_price_id})
     db.flush()
 
 
-def delete_booking_items(db: Session, booking_id: int):
-    db.execute(
-        text("""
-            DELETE FROM BaggageOptionInFlight 
-            WHERE booking_item_id IN (
-                SELECT booking_item_id FROM BookingItem WHERE booking_id = :booking_id
-            )
-        """),
-        {"booking_id": booking_id}
-    )
+def delete_booking_items(db: Session, booking_id: int) -> None:
+    db.execute(text("""
+        DELETE FROM BaggageOptionInFlight
+        WHERE booking_item_id IN (
+            SELECT booking_item_id FROM BookingItem WHERE booking_id = :booking_id
+        )
+    """), {"booking_id": booking_id})
     db.execute(
         text("DELETE FROM BookingItem WHERE booking_id = :booking_id"),
-        {"booking_id": booking_id}
+        {"booking_id": booking_id},
     )
     db.flush()
 
 
-def update_booking_amount(db: Session, booking_id: int, amount: float):
-    sql = text("""
+def update_booking_amount(db: Session, booking_id: int, amount: float) -> None:
+    db.execute(text("""
         UPDATE Booking SET booking_total_amount = :amount WHERE booking_id = :booking_id
-    """)
-    db.execute(sql, {"amount": amount, "booking_id": booking_id})
+    """), {"amount": amount, "booking_id": booking_id})
     db.flush()
 
 
@@ -228,43 +229,48 @@ def get_passengers_with_email(db: Session, booking_id: int) -> list[dict]:
             p.passenger_email
         FROM BookingItem bi
         JOIN PassengerDocument pd ON bi.passenger_document_id = pd.passenger_document_id
-        JOIN Passenger p ON pd.passenger_id = p.passenger_id
+        JOIN Passenger p          ON pd.passenger_id = p.passenger_id
         WHERE bi.booking_id = :booking_id
           AND p.passenger_email IS NOT NULL
           AND p.passenger_email != ''
     """), {"booking_id": booking_id}).fetchall()
-    
+
     return [
         {
             "passengerId": r.passenger_id,
-            "firstName": r.passenger_first_name,
-            "lastName": r.passenger_last_name,
-            "email": r.passenger_email,
+            "firstName":   r.passenger_first_name,
+            "lastName":    r.passenger_last_name,
+            "email":       r.passenger_email,
         }
         for r in rows
     ]
 
 
-def get_bookings(db: Session, skip: int = 0, limit: int = 50,
-                 status: str | None = None,
-                 airline_name: str | None = None,
-                 date_filter: str | None = 'this_month'):
-
+def get_bookings(
+    db: Session,
+    skip: int = 0,
+    limit: int = 50,
+    status: str | None = None,
+    airline_name: str | None = None,
+    date_filter: str | None = "this_month",
+) -> list[dict]:
     date_condition = ""
-    if date_filter == 'today':
-        date_condition = "AND CAST(f.departs_datetime AS DATE) = CAST(GETDATE() AS DATE)"
-    elif date_filter == 'this_week':
-        date_condition = "AND f.departs_datetime >= DATEADD(DAY, 1 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE)) AND f.departs_datetime < DATEADD(DAY, 8 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE))"
-    elif date_filter == 'this_month':
-        date_condition = "AND MONTH(f.departs_datetime) = MONTH(GETDATE()) AND YEAR(f.departs_datetime) = YEAR(GETDATE())"
-    elif date_filter == 'past':
-        date_condition = "AND f.departs_datetime < GETDATE()"
-
+    if date_filter == "today":
+        date_condition = "AND CAST(sf.departs_date AS DATE) = CAST(GETDATE() AS DATE)"
+    elif date_filter == "this_week":
+        date_condition = (
+            "AND sf.departs_date >= DATEADD(DAY, 1 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE)) "
+            "AND sf.departs_date < DATEADD(DAY, 8 - DATEPART(WEEKDAY, GETDATE()), CAST(GETDATE() AS DATE))"
+        )
+    elif date_filter == "this_month":
+        date_condition = "AND MONTH(sf.departs_date) = MONTH(GETDATE()) AND YEAR(sf.departs_date) = YEAR(GETDATE())"
+    elif date_filter == "past":
+        date_condition = "AND sf.departs_date < CAST(GETDATE() AS DATE)"
 
     airline_condition = "AND al.airline_name = :airline_name" if airline_name else ""
 
     sql = text(f"""
-        SELECT 
+        SELECT
             b.booking_id,
             b.booking_number,
             b.booking_date_time,
@@ -272,8 +278,7 @@ def get_bookings(db: Session, skip: int = 0, limit: int = 50,
             bs.booking_status_name,
             first_flight.from_city,
             first_flight.to_city,
-            first_flight.departs_datetime,
-            first_flight.arrives_datetime,
+            first_flight.departs_date,
             first_flight.airline_name,
             pax.passengers_list,
             pax.passenger_count
@@ -281,45 +286,42 @@ def get_bookings(db: Session, skip: int = 0, limit: int = 50,
         JOIN BookingStatus bs ON b.booking_status_id = bs.booking_status_id
         OUTER APPLY (
             SELECT TOP 1
-                dep_city.city_name AS from_city,
-                arr_city.city_name AS to_city,
-                f.departs_datetime,
-                f.arrives_datetime,
+                dep_city.city_name  AS from_city,
+                arr_city.city_name  AS to_city,
+                sf.departs_date,
                 al.airline_name
             FROM BookingItem bi
-            JOIN FlightPrice fp ON bi.flight_price_id = fp.flight_price_id
-            JOIN FlightClass fc ON fp.flight_class_id = fc.flight_class_id
-            JOIN Flight f ON fc.flight_id = f.flight_id
-            JOIN FlightSchedule fs ON f.flight_schedule_id = fs.flight_schedule_id
-            JOIN Route r ON fs.route_id = r.route_id
-            JOIN Airline al ON r.airline_id = al.airline_id
-            JOIN Airport dep_a ON r.departs_airport_id = dep_a.airport_id
-            JOIN Airport arr_a ON r.arrives_airport_id = arr_a.airport_id
-            JOIN City dep_city ON dep_a.city_id = dep_city.city_id
-            JOIN City arr_city ON arr_a.city_id = arr_city.city_id
+            JOIN FlightPrice fp   ON bi.flight_price_id    = fp.flight_price_id
+            JOIN ScheduledFlight sf ON fp.schedule_flight_id = sf.schedule_flight_id
+            JOIN FlightClass fc   ON fp.flight_class_id    = fc.flight_class_id
+            JOIN Flight f         ON fc.flight_id          = f.flight_id
+            JOIN Route r          ON f.route_id            = r.route_id
+            JOIN Airline al       ON f.airline_id          = al.airline_id
+            JOIN Airport dep_a    ON r.departs_airport_id  = dep_a.airport_id
+            JOIN Airport arr_a    ON r.arrives_airport_id  = arr_a.airport_id
+            JOIN City dep_city    ON dep_a.city_id         = dep_city.city_id
+            JOIN City arr_city    ON arr_a.city_id         = arr_city.city_id
             WHERE bi.booking_id = b.booking_id
             {date_condition}
             {airline_condition}
             ORDER BY bi.booking_item_id
         ) first_flight
         OUTER APPLY (
-            SELECT 
-                STRING_AGG(
-                    p.passenger_first_name + ' ' + p.passenger_last_name, ', '
-                ) AS passengers_list,
+            SELECT
+                STRING_AGG(p.passenger_first_name + ' ' + p.passenger_last_name, ', ') AS passengers_list,
                 COUNT(*) AS passenger_count
             FROM BookingItem bi
             JOIN PassengerDocument pd ON bi.passenger_document_id = pd.passenger_document_id
-            JOIN Passenger p ON pd.passenger_id = p.passenger_id
+            JOIN Passenger p          ON pd.passenger_id = p.passenger_id
             WHERE bi.booking_id = b.booking_id
         ) pax
         WHERE (:status IS NULL OR bs.booking_status_name = :status)
-          AND (:date_filter IS NULL OR :date_filter = 'all_time' OR first_flight.departs_datetime IS NOT NULL)
+          AND (:date_filter IS NULL OR :date_filter = 'all_time' OR first_flight.departs_date IS NOT NULL)
         ORDER BY b.booking_date_time DESC
         OFFSET :skip ROWS FETCH NEXT :limit ROWS ONLY
     """)
 
-    params = {
+    params: dict = {
         "skip": skip,
         "limit": limit,
         "status": status,
@@ -328,24 +330,18 @@ def get_bookings(db: Session, skip: int = 0, limit: int = 50,
     if airline_name:
         params["airline_name"] = airline_name
 
-    print(f"get_bookings: airline={airline_name}, status={status}, date_filter={date_filter}")
+    logger.debug("get_bookings: airline=%s, status=%s, date_filter=%s", airline_name, status, date_filter)
     rows = db.execute(sql, params).fetchall()
-    print(f"get_bookings result: {len(rows)}")
+    logger.debug("get_bookings result: %d rows", len(rows))
     return [dict(r._mapping) for r in rows]
 
 
-
 def get_earliest_flight_date(db: Session, booking_id: int):
-    from datetime import datetime
-    sql = text("""
-        SELECT MIN(f.departs_datetime) AS earliest
+    row = db.execute(text("""
+        SELECT MIN(sf.departs_date) AS earliest
         FROM BookingItem bi
-        JOIN FlightPrice fp ON bi.flight_price_id = fp.flight_price_id
-        JOIN FlightClass fc ON fp.flight_class_id = fc.flight_class_id
-        JOIN Flight f ON fc.flight_id = f.flight_id
+        JOIN FlightPrice fp     ON bi.flight_price_id    = fp.flight_price_id
+        JOIN ScheduledFlight sf ON fp.schedule_flight_id = sf.schedule_flight_id
         WHERE bi.booking_id = :booking_id
-    """)
-    row = db.execute(sql, {"booking_id": booking_id}).fetchone()
+    """), {"booking_id": booking_id}).fetchone()
     return row.earliest if row and row.earliest else None
-
-##        AND (:airline_name IS NULL OR first_flight.airline_name = :airline_name)
