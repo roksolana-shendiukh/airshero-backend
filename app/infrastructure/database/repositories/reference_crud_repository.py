@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
-from app.infrastructure.database.models.city_model import City
-from app.infrastructure.database.models.country_model import Country
-from app.infrastructure.database.models.flight_model import Class
+from app.infrastructure.database.models.airport_model import City, Country
+from app.infrastructure.database.models.seat_model import Class
+from app.infrastructure.database.models.airport_model import TerminalType
 from app.infrastructure.database.models.baggage_model import BaggageType, BaggagePricingRule
-from app.infrastructure.database.models.terminal_model import TerminalType
+
 
 
 def get_all_countries(db: Session) -> list:
@@ -146,13 +146,11 @@ def create_baggage_rule(
     baggage_type_id: int,
     baggage_dimension: str | None,
     baggage_max_weight: float,
-    overweight_fee_per_kg: float,
 ) -> BaggagePricingRule:
     obj = BaggagePricingRule(
         baggage_type_id=baggage_type_id,
         baggage_dimension=baggage_dimension,
         baggage_max_weight=baggage_max_weight,
-        overweight_fee_per_kg=overweight_fee_per_kg,
     )
     db.add(obj)
     db.commit()
