@@ -1,28 +1,35 @@
-from .citizenship_model import Citizenship
-from .document_model import DocumentType, PassengerDocument
-from .passenger_model import Passenger
+from __future__ import annotations
+from .base import Base
 
-from .airline_model import Airline
-from .country_model import Country
-from .city_model import City
-from .airline_airfleet_model import AirlineAirfleet
-from .flight_crew_model import FlightCrewPosition, FlightCrewLicenseType, FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation
-from .airport_model import Airport
-from .airfleet_model import AirfleetManufacturer, Airfleet
-from .route_model import Route
-from .flight_schedule_model import FlightSchedule
-
-from .flight_model import FlightStatus, Class, Flight, FlightClass, FlightPrice
-from .baggage_model import BaggageType, BaggagePricingRule, BaggagePricingInFlight, BaggageOptionInFlight
-
-from .payment_model import PaymentStatus, PaymentMethod, Payment
-from .booking_model import BookingStatus, Booking, BookingItem
-
-from .seat_model import SeatType, SeatLayout
-from .terminal_model import TerminalType, Terminal
-from .gate_model import Gate
-from .flight_operation_model import FlightOperationStatus, FlightOperation
-
-from .checkin_model import CheckInAgent, CheckinInPayment
+from .airline_model import Airline, Alliance, AirlineAirfleet
+from .airfleet_model import Airfleet, AirfleetManufacturer, AirfleetFlightCrew
+from .airport_model import Airport, City, Country, Terminal, TerminalType, Gate
+from .flight_model import Flight, Route, FlightClass, FlightFlightCrew
+from .flight_schedule_model import FlightSchedule, FlightSeason, FlightScheduleDaySchedule, Schedule, DaySchedule, DayForSchedule
+from .flight_operation_model import FlightOperation, FlightOperationState, FlightOperationStatus, ScheduledFlight, FlightPrice, FlightStatus
+from .crew_model import FlightCrew, FlightCrewPosition, FlightCrewLicenseType, FlightCrewFlightOperation
+from .booking_model import Booking, BookingItem, BookingStatus
+from .passenger_model import Passenger, PassengerDocument, Citizenship, DocumentType
+from .payment_model import Payment, PaymentMethod, PaymentStatus, CheckinInPayment
+from .checkin_model import CheckInAgent, CheckInAgentFlightOperation
+from .baggage_model import BaggageUnit, BaggageType, BaggagePricingRule, BaggagePricingInFlight, BaggageOptionInFlight, t_BaggageUnitCheckInPayment
 from .boarding_pass_model import BoardingPass
-from .baggage_unit_model import BaggageUnit
+from .seat_model import SeatLayout, SeatType, Class
+
+__all__ = [
+    "Base",
+    "Airline", "Alliance", "AirlineAirfleet",
+    "Airfleet", "AirfleetManufacturer", "AirfleetFlightCrew",
+    "Airport", "City", "Country", "Terminal", "TerminalType", "Gate",
+    "Flight", "Route", "FlightClass", "FlightFlightCrew",
+    "FlightSchedule", "FlightSeason", "FlightScheduleDaySchedule", "Schedule", "DaySchedule", "DayForSchedule",
+    "FlightOperation", "FlightOperationState", "FlightOperationStatus", "ScheduledFlight", "FlightPrice", "FlightStatus",
+    "FlightCrew", "FlightCrewPosition", "FlightCrewLicenseType", "FlightCrewFlightOperation",
+    "Booking", "BookingItem", "BookingStatus",
+    "Passenger", "PassengerDocument", "Citizenship", "DocumentType",
+    "Payment", "PaymentMethod", "PaymentStatus", "CheckinInPayment",
+    "CheckInAgent", "CheckInAgentFlightOperation",
+    "BaggageUnit", "BaggageType", "BaggagePricingRule", "BaggagePricingInFlight", "BaggageOptionInFlight", "t_BaggageUnitCheckInPayment",
+    "BoardingPass",
+    "SeatLayout", "SeatType", "Class",
+]
