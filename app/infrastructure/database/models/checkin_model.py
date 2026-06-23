@@ -7,6 +7,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
 
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .airport_model import Airport
+    from .flight_operation_model import FlightOperation
+    from .boarding_pass_model import BoardingPass
 
 class CheckInAgent(Base):
     __tablename__ = 'CheckInAgent'
