@@ -1,15 +1,15 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_
-from app.infrastructure.database.models.flight_crew_model import (
-    FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation
+from sqlalchemy import or_
+from app.infrastructure.database.models.crew_model import (
+    FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation, 
+    FlightCrewPosition
 )
-from app.infrastructure.database.models.airline_airfleet_model import AirlineAirfleet
-from app.infrastructure.database.models.flight_operation_model import FlightOperation, FlightOperationStatus
-from app.infrastructure.database.models.flight_model import Flight
-from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
-from app.infrastructure.database.models.route_model import Route
+from app.infrastructure.database.models.airline_model import AirlineAirfleet
+from app.infrastructure.database.models.flight_operation_model import (
+    FlightOperation, FlightOperationStatus, ScheduledFlight
+)
+from app.infrastructure.database.models.flight_model import Flight, Route
 from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.flight_crew_model import FlightCrewPosition
 
 
 def get_crew_for_operation(db: Session, operation_id: int) -> list[FlightCrew]:
@@ -31,9 +31,10 @@ def _get_crew_current_airport(db: Session, crew_id: int) -> int | None:
     result = (
         db.query(Airport.airport_id)
         .join(Route, Route.arrives_airport_id == Airport.airport_id)
-        .join(FlightSchedule, FlightSchedule.route_id == Route.route_id)
-        .join(Flight, Flight.flight_schedule_id == FlightSchedule.flight_schedule_id)
-        .join(FlightOperation, FlightOperation.flight_id == Flight.flight_id)
+        .join(Flight, Flight.route_id == Route.route_id)
+        .join(ScheduledFlight, ScheduledFlight.flight_id == Flight.flight_id)
+        .join(FlightOperation, 
+              FlightOperation.schedule_flight_id == ScheduledFlight.schedule_flight_id)
         .join(FlightCrewFlightOperation,
               FlightCrewFlightOperation.flight_operation_id == FlightOperation.flight_operation_id)
         .join(FlightOperationStatus,
@@ -57,25 +58,23 @@ def get_available_crew(
     search: str | None = None,
     position: str | None = 'Pilot',
 ) -> list[tuple[FlightCrew, bool]]:
-    current_op = db.query(FlightOperation).filter(
-        FlightOperation.flight_operation_id == operation_id
-    ).first()
-
+    
     departs_airport_id: int | None = None
+    current_op = (
+        db.query(FlightOperation)
+        .filter(FlightOperation.flight_operation_id == operation_id)
+        .first()
+    )
     if current_op:
-        flight = (
-            db.query(Flight)
-            .options(
-                joinedload(Flight.flight_schedule)
-                .joinedload(FlightSchedule.route)
-            )
-            .filter(Flight.flight_id == current_op.flight_id)
+        row = (
+            db.query(Route.departs_airport_id)
+            .join(Flight, Flight.route_id == Route.route_id)
+            .join(ScheduledFlight, ScheduledFlight.flight_id == Flight.flight_id)
+            .filter(ScheduledFlight.schedule_flight_id == current_op.schedule_flight_id)
             .first()
         )
-        if flight:
-            schedule           = getattr(flight, 'flight_schedule', None)
-            route              = getattr(schedule, 'route', None)
-            departs_airport_id = getattr(route, 'departs_airport_id', None)
+        if row:
+            departs_airport_id = row[0]
 
     assigned_ids = {
         r.flight_crew_id
@@ -100,8 +99,9 @@ def get_available_crew(
         return []
 
     active_statuses = {'Waiting', 'Boarding', 'Baggage Loading', 'Departed', 'Arrived'}
-    conflicts = (
-        db.query(FlightCrewFlightOperation.flight_crew_id)
+    busy_ids = {
+        r.flight_crew_id
+        for r in db.query(FlightCrewFlightOperation.flight_crew_id)
         .join(FlightOperation,
               FlightOperation.flight_operation_id ==
               FlightCrewFlightOperation.flight_operation_id)
@@ -113,8 +113,7 @@ def get_available_crew(
             FlightOperationStatus.flight_operation_status_name.in_(active_statuses),
         )
         .all()
-    )
-    busy_ids = {r.flight_crew_id for r in conflicts}
+    }
 
     available_ids = certified_ids - assigned_ids - busy_ids
     if not available_ids:
@@ -139,7 +138,8 @@ def get_available_crew(
         )
 
     if position:
-        query = query.join(FlightCrewPosition,
+        query = query.join(
+            FlightCrewPosition,
             FlightCrewPosition.flight_crew_position_id == FlightCrew.flight_crew_position_id
         ).filter(FlightCrewPosition.flight_crew_position_name == position)
 
@@ -190,10 +190,9 @@ def remove_crew_member(
 
 def get_all_crew(
     db: Session,
-    search:   str | None = None,
+    search: str | None = None,
     position: str | None = None,
 ) -> list[FlightCrew]:
-    from app.infrastructure.database.models.flight_crew_model import FlightCrewLicenseType
     query = db.query(FlightCrew).options(
         joinedload(FlightCrew.position),
         joinedload(FlightCrew.license_type),
@@ -225,10 +224,10 @@ def get_crew_by_id(db: Session, crew_id: int) -> FlightCrew | None:
 
 def create_crew(
     db: Session,
-    first_name:       str,
-    last_name:        str,
-    position_id:      int,
-    license_type_id:  int,
+    first_name: str,
+    last_name: str,
+    position_id: int,
+    license_type_id: int,
     experience_years: int,
 ) -> FlightCrew:
     crew = FlightCrew(
@@ -244,12 +243,12 @@ def create_crew(
 
 
 def update_crew(
-    db:               Session,
-    crew:             FlightCrew,
-    first_name:       str | None,
-    last_name:        str | None,
-    position_id:      int | None,
-    license_type_id:  int | None,
+    db: Session,
+    crew: FlightCrew,
+    first_name: str | None,
+    last_name: str | None,
+    position_id: int | None,
+    license_type_id: int | None,
     experience_years: int | None,
 ) -> FlightCrew:
     if first_name       is not None: crew.flight_crew_first_name       = first_name
@@ -267,12 +266,11 @@ def delete_crew(db: Session, crew: FlightCrew) -> None:
 
 
 def get_positions(db: Session):
-    from app.infrastructure.database.models.flight_crew_model import FlightCrewPosition
     return db.query(FlightCrewPosition).all()
 
 
 def get_license_types(db: Session):
-    from app.infrastructure.database.models.flight_crew_model import FlightCrewLicenseType
+    from app.infrastructure.database.models.crew_model import FlightCrewLicenseType
     return db.query(FlightCrewLicenseType).all()
 
 
@@ -281,11 +279,9 @@ def crew_to_dto(c: FlightCrew) -> dict:
         "flightCrewId":    c.flight_crew_id,
         "firstName":       c.flight_crew_first_name,
         "lastName":        c.flight_crew_last_name,
-        "position":        c.position.flight_crew_position_name          if c.position     else None,
+        "position":        c.position.flight_crew_position_name         if c.position     else None,
         "positionId":      c.flight_crew_position_id,
-        "licenseType":     c.license_type.flight_crew_license_type_name  if c.license_type else None,
+        "licenseType":     c.license_type.flight_crew_license_type_name if c.license_type else None,
         "licenseTypeId":   c.flight_crew_license_type,
         "experienceYears": c.flight_crew_experience_years,
     }
-
-
