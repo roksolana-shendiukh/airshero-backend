@@ -3,60 +3,59 @@ from pydantic import BaseModel
 
 class ClassPriceDTO(BaseModel):
     class_id: int
-    price: float
+    price:    float
 
 
 class CreateFlightDTO(BaseModel):
-    flightScheduleId: int
-    departsDatetime: str
-    arrivesDatetime: str
-    classPrices: list[ClassPriceDTO]
+    schedule_flight_id: int
+    departs_datetime:   str
+    arrives_datetime:   str
+    class_prices:       list[ClassPriceDTO]
+
 
 class ConfigureFlightDTO(BaseModel):
-    classPrices: list[ClassPriceDTO]
+    class_prices: list[ClassPriceDTO]
 
 
 class FlightBaggageOptionDTO(BaseModel):
-    classId: int
-    baggagePricingRuleId: int
-    price: float
+    class_id:               int
+    baggage_pricing_rule_id: int
+    price:                  float
 
 
 class AddFlightBaggageDTO(BaseModel):
-    baggageOptions: list[FlightBaggageOptionDTO]
+    baggage_options: list[FlightBaggageOptionDTO]
 
 
 class ScheduleGroupDTO(BaseModel):
-    dayIds: list[int]
-    departureTime: str
+    day_ids:        list[int]
+    departure_time: str
 
 
 class CreateRouteDTO(BaseModel):
-    airfleetId: int
-    departsAirportId: int
-    arrivesAirportId: int
-    flightNumber: str | None = None
-    scheduleGroups: list[ScheduleGroupDTO]
-    flightStartDate: str
-    flightEndDate: str
+    airfleet_id:       int
+    departs_airport_id: int
+    arrives_airport_id: int
+    flight_number:      str | None = None
+    schedule_groups:    list[ScheduleGroupDTO]
+    flight_start_date:  str
+    flight_end_date:    str
 
 
 class CreateScheduleDTO(BaseModel):
-    scheduleGroups: list[ScheduleGroupDTO]
-    flightStartDate: str
-    flightEndDate: str
+    schedule_groups:   list[ScheduleGroupDTO]
+    flight_start_date: str
+    flight_end_date:   str
 
 
 class ConfirmFlightsDTO(BaseModel):
-    flightIds: list[int]
+    flight_ids: list[int]
+
 
 class UpdateFlightClassesDTO(BaseModel):
-    classIds: list[int]
+    class_ids: list[int]
 
 
 class UpdateFlightTimesDTO(BaseModel):
-    departsDatetime: str  
-    arrivesDatetime: str  
-
-
-
+    departs_datetime: str
+    arrives_datetime: str
