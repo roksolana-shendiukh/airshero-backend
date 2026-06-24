@@ -5,29 +5,29 @@ from typing import Optional
 
 class BaggageItemDTO(BaseModel):
     baggage_pricing_in_flight_id: int
-    quantity: int
+    quantity:                     int
 
 
 class BookingPassengerDTO(BaseModel):
-    passenger_id: Optional[int] = None
-    document_id: Optional[int] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    sex: Optional[bool] = None
-    email: Optional[str] = None 
-    date_of_birth: Optional[str] = None
-    citizenship_id: Optional[int] = None
-    document_type_id: Optional[int] = None
-    document_number: Optional[str] = None
-    document_date_of_issue: Optional[str] = None
-    document_date_of_expire: Optional[str] = None
-    flight_price_id: int
-    return_flight_price_id: Optional[int] = None
-    baggage_items: list[BaggageItemDTO] = []
+    passenger_id:             Optional[int] = None
+    document_id:              Optional[int] = None
+    first_name:               Optional[str] = None
+    last_name:                Optional[str] = None
+    sex:                      Optional[bool] = None
+    email:                    Optional[str] = None
+    date_of_birth:            Optional[str] = None
+    citizenship_id:           Optional[int] = None
+    document_type_id:         Optional[int] = None
+    document_number:          Optional[str] = None
+    document_date_of_issue:   Optional[str] = None
+    document_date_of_expire:  Optional[str] = None
+    flight_price_id:          int
+    return_flight_price_id:   Optional[int] = None
+    baggage_items:            list[BaggageItemDTO] = []
 
 
 class CreateBookingDTO(BaseModel):
-    passengers: list[BookingPassengerDTO]
+    passengers:   list[BookingPassengerDTO]
     total_amount: float
 
 
@@ -37,31 +37,32 @@ class CreateGroupBookingDTO(BaseModel):
 
 
 class BookingResponseDTO(BaseModel):
-    bookingId: int
-    bookingNumber: str
-    expiresAt: datetime
+    booking_id:     int
+    booking_number: str
+    expires_at:     datetime
 
 
 class GroupBookingResponseDTO(BaseModel):
-    booking1: BookingResponseDTO
-    booking2: BookingResponseDTO
-    expiresAt: datetime
+    booking1:   BookingResponseDTO
+    booking2:   BookingResponseDTO
+    expires_at: datetime
 
-
-    
 
 class ReservePassengerDTO(BaseModel):
-    flight_price_id: int
+    flight_price_id:        int
     return_flight_price_id: Optional[int] = None
 
+
 class ReserveBookingDTO(BaseModel):
-    passengers: list[ReservePassengerDTO]
+    passengers:   list[ReservePassengerDTO]
     total_amount: float
+
 
 class ReserveGroupBookingDTO(BaseModel):
     booking1: ReserveBookingDTO
     booking2: ReserveBookingDTO
 
+
 class UpdatePassengersDTO(BaseModel):
-    passengers: list[BookingPassengerDTO]
+    passengers:   list[BookingPassengerDTO]
     total_amount: Optional[float] = None
