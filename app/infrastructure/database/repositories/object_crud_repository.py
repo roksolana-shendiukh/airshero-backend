@@ -1,12 +1,11 @@
 from sqlalchemy.orm import Session
 from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.terminal_model import Terminal, TerminalType
-from app.infrastructure.database.models.gate_model import Gate
+from app.infrastructure.database.models.airport_model import Terminal, TerminalType, Gate
 from app.infrastructure.database.models.airline_model import Airline
 from app.infrastructure.database.models.airfleet_model import Airfleet, AirfleetManufacturer
-from app.infrastructure.database.models.route_model import Route
-from app.infrastructure.database.models.city_model import City
-from app.infrastructure.database.models.country_model import Country
+from app.infrastructure.database.models.flight_model import Route, Flight
+from app.infrastructure.database.models.airport_model import City
+from app.infrastructure.database.models.airport_model import Country
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 
@@ -339,7 +338,12 @@ def delete_manufacturer(db: Session, manufacturer_id: int) -> bool:
 
 
 def get_all_routes(db: Session) -> list:
-    return db.query(Route).order_by(Route.flight_number).all()
+    return (
+        db.query(Route)
+        .join(Flight, Flight.route_id == Route.route_id)
+        .order_by(Flight.flight_number)
+        .all()
+    )
 
 def get_route(db: Session, route_id: int) -> Route | None:
     return db.query(Route).filter(Route.route_id == route_id).first()
@@ -351,7 +355,6 @@ def delete_route(db: Session, route_id: int) -> bool:
     db.delete(obj)
     db.commit()
     return True
-
 
 def get_all_countries(db: Session):
     return db.query(Country).order_by(Country.country_name).all()

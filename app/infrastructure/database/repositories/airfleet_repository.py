@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.infrastructure.database.models.airfleet_model import Airfleet
-from app.infrastructure.database.models.airline_airfleet_model import AirlineAirfleet
+from app.infrastructure.database.models.airline_model import AirlineAirfleet
 
 
 def get_all(

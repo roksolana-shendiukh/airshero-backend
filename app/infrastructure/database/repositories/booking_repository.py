@@ -47,7 +47,7 @@ def insert_booking(
         booking_date_time=datetime.now(),
     )
     db.add(booking)
-    db.flush()
+    db.commit()
     return booking
 
 
@@ -63,7 +63,7 @@ def insert_booking_item(
         flight_price_id=flight_price_id,
     )
     db.add(item)
-    db.flush()
+    db.commit()
     return item
 
 
@@ -196,7 +196,7 @@ def insert_booking_item_no_passenger(db: Session, booking_id: int, flight_price_
         INSERT INTO BookingItem (booking_id, flight_price_id)
         VALUES (:booking_id, :flight_price_id)
     """), {"booking_id": booking_id, "flight_price_id": flight_price_id})
-    db.flush()
+    db.commit()
 
 
 def delete_booking_items(db: Session, booking_id: int) -> None:
@@ -210,14 +210,14 @@ def delete_booking_items(db: Session, booking_id: int) -> None:
         text("DELETE FROM BookingItem WHERE booking_id = :booking_id"),
         {"booking_id": booking_id},
     )
-    db.flush()
+    db.commit()
 
 
 def update_booking_amount(db: Session, booking_id: int, amount: float) -> None:
     db.execute(text("""
         UPDATE Booking SET booking_total_amount = :amount WHERE booking_id = :booking_id
     """), {"amount": amount, "booking_id": booking_id})
-    db.flush()
+    db.commit()
 
 
 def get_passengers_with_email(db: Session, booking_id: int) -> list[dict]:

@@ -314,7 +314,6 @@ def create_flight(
     departs_date: str,
     class_prices: list[dict],
 ) -> int:
-    # Створюємо ScheduledFlight (саме тут живе статус і дата)
     sql_sf = text("""
         INSERT INTO ScheduledFlight
             (flight_id, flight_status_id, departs_date, sales_start_date)
@@ -351,7 +350,7 @@ def create_flight(
             "ticket_price":       cp["price"],
         })
 
-    db.flush()
+    db.commit()
     return schedule_flight_id
 
 
@@ -396,7 +395,7 @@ def add_baggage_to_flight(db: Session, flight_id: int, baggage_options: list[dic
                 "price":           opt["price"],
             })
 
-    db.flush()
+    db.commit()
 
 
 def get_airfleets_for_airline(db: Session, airline_id: int) -> list:
@@ -524,7 +523,7 @@ def create_route(
         "flight_duration": flight_duration,
     })
 
-    db.flush()
+    db.commit()
     return route_id
 
 
@@ -573,7 +572,7 @@ def create_schedule_for_route(
                 "day_schedule_id":    day_schedule_id,
             })
 
-    db.flush()
+    db.commit()
     return flight_schedule_id
 
 
@@ -622,7 +621,7 @@ def generate_flights_for_schedule(
                 count += 1
             current += timedelta(days=1)
 
-    db.flush()
+    db.commit()
     return count
 
 
@@ -814,7 +813,7 @@ def configure_planned_flight(
         "status_id":          scheduled_id,
         "schedule_flight_id": schedule_flight_id,
     })
-    db.flush()
+    db.commit()
 
 
 def get_scheduled_flights_for_pricing(db: Session, airline_id: int) -> list:
@@ -930,7 +929,7 @@ def update_flight_prices(
         "status_id":          scheduled_id,
         "schedule_flight_id": schedule_flight_id,
     })
-    db.flush()
+    db.commit()
 
 
 def get_existing_route(
@@ -959,7 +958,6 @@ def get_existing_route(
 def get_last_configured_scheduled_flight(
     db: Session, flight_id: int
 ) -> int | None:
-    """Останній ScheduledFlight зі статусом Scheduled для цього flight_id."""
     return db.execute(text("""
         SELECT TOP 1 sf.schedule_flight_id
         FROM ScheduledFlight sf
@@ -1159,7 +1157,7 @@ def confirm_flights(db: Session, flight_ids: list[int]) -> int:
         })
         count += result.rowcount
 
-    db.flush()
+    db.commit()
     return count
 
 
@@ -1203,7 +1201,7 @@ def update_flight_classes(
                 VALUES (:class_id, :flight_id)
             """), {"class_id": class_id, "flight_id": flight_id})
 
-    db.flush()
+    db.commit()
 
 
 def update_flight_baggage(
@@ -1247,7 +1245,7 @@ def update_flight_baggage(
                 "price":           opt["price"],
             })
 
-    db.flush()
+    db.commit()
 
 
 def cancel_flight(db: Session, schedule_flight_id: int) -> None:
@@ -1260,7 +1258,7 @@ def cancel_flight(db: Session, schedule_flight_id: int) -> None:
         SET flight_status_id = :sid
         WHERE schedule_flight_id = :sf_id
     """), {"sid": cancelled_id, "sf_id": schedule_flight_id})
-    db.flush()
+    db.commit()
 
 
 def get_flight_route_details(db: Session, flight_id: int):
@@ -1319,4 +1317,4 @@ def update_scheduled_flight_date(
         SET departs_date = :departs_date
         WHERE schedule_flight_id = :sf_id
     """), {"departs_date": departs_date, "sf_id": schedule_flight_id})
-    db.flush()
+    db.commit()

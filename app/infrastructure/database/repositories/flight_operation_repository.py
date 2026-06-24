@@ -50,7 +50,7 @@ def create(db: Session, data: FlightOperationCreateDTO) -> FlightOperation:
         gate_id=data.gate_id,
     )
     db.add(op)
-    db.flush()  
+    db.commit()  
 
     db.refresh(op)
     return get_by_id(db, op.flight_operation_id)
@@ -59,10 +59,10 @@ def create(db: Session, data: FlightOperationCreateDTO) -> FlightOperation:
 def update(db: Session, op: FlightOperation, data: FlightOperationUpdateDTO) -> FlightOperation:
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(op, field, value)
-    db.flush()
+    db.commit()
     return op
 
 
 def delete(db: Session, op: FlightOperation) -> None:
     db.delete(op)
-    db.flush()
+    db.commit()
