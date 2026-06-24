@@ -26,7 +26,6 @@ def get_baggage_options(db: Session, flight_class_id: int) -> list:
                 "baggageTypeId":      r.baggage_pricing_rule.baggage_type_id,
                 "dimension":          r.baggage_pricing_rule.baggage_dimension,
                 "maxWeight":          float(r.baggage_pricing_rule.baggage_max_weight),
-                "overweightFeePerKg": float(r.baggage_pricing_rule.overweight_fee_per_kg),
             },
             "type": {
                 "id":   r.baggage_pricing_rule.baggage_type.baggage_type_id,

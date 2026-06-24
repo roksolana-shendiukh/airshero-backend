@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from app.infrastructure.database.models.passenger_model import Passenger
-from app.infrastructure.database.models.document_model import PassengerDocument
+from app.infrastructure.database.models.passenger_model import PassengerDocument
 from app.interfaces.schemas.passenger_schema import PassengerCreateDTO, PassengerUpdateDTO
 
 
@@ -42,21 +43,27 @@ def get_document_by_number(db: Session, document_number: str) -> PassengerDocume
 
 
 def search_partial(db: Session, query: str, limit: int = 10) -> list[Passenger]:
+    # ✅ outerjoin щоб пасажири без документів теж потрапляли в результат
     return (
         db.query(Passenger)
         .options(joinedload(Passenger.documents))
-        .join(Passenger.documents)
+        .outerjoin(Passenger.documents)
         .filter(
-            Passenger.passenger_first_name.ilike(f"%{query}%")
-            | Passenger.passenger_last_name.ilike(f"%{query}%")
-            | PassengerDocument.document_number.ilike(f"%{query}%")
+            or_(
+                Passenger.passenger_first_name.ilike(f"%{query}%"),
+                Passenger.passenger_last_name.ilike(f"%{query}%"),
+                PassengerDocument.document_number.ilike(f"%{query}%"),
+            )
         )
+        .distinct()  # outerjoin може дати дублікати
         .limit(limit)
         .all()
     )
 
 
-def search_documents_partial(db: Session, query: str, limit: int = 10) -> list[PassengerDocument]:
+def search_documents_partial(
+    db: Session, query: str, limit: int = 10
+) -> list[PassengerDocument]:
     return (
         db.query(PassengerDocument)
         .options(
@@ -72,25 +79,25 @@ def search_documents_partial(db: Session, query: str, limit: int = 10) -> list[P
 
 def create(db: Session, data: PassengerCreateDTO) -> Passenger:
     passenger = Passenger(
-        passenger_first_name=data.first_name,
-        passenger_last_name=data.last_name,
-        passenger_sex=data.sex,
-        passenger_email=data.email,
-        passenger_date_of_birth=data.date_of_birth,
+        passenger_first_name    = data.first_name,
+        passenger_last_name     = data.last_name,
+        passenger_sex           = data.sex,
+        passenger_email         = data.email,
+        passenger_date_of_birth = data.date_of_birth,
     )
     db.add(passenger)
-    db.flush()
+    db.commit()
 
     document = PassengerDocument(
-        passenger_id=passenger.passenger_id,
-        document_number=data.document_number,
-        document_type_id=data.document_type_id,
-        citizenship_id=data.citizenship_id,
-        document_date_of_issue=data.document_date_of_issue,
-        document_date_of_expire=data.document_date_of_expire,
+        passenger_id              = passenger.passenger_id,
+        document_number           = data.document_number,
+        document_type_id          = data.document_type_id,
+        citizenship_id            = data.citizenship_id,
+        document_date_of_issue    = data.document_date_of_issue,
+        document_date_of_expire   = data.document_date_of_expire,
     )
     db.add(document)
-    db.flush()
+    db.commit()
     return passenger
 
 
@@ -100,14 +107,13 @@ def update(db: Session, passenger: Passenger, data: PassengerUpdateDTO) -> Passe
     if data.last_name is not None:
         passenger.passenger_last_name = data.last_name
     if data.sex is not None:
-        passenger.passenger_sex = data.sex
-    if data.sex is not None:
-        passenger.passenger_sex = data.sex
+        passenger.passenger_sex = data.sex  
+    if data.email is not None:
+        passenger.passenger_email = data.email
+    db.commit()  
     return passenger
 
 
 def delete(db: Session, passenger: Passenger) -> None:
     db.delete(passenger)
-    db.commit()
-
-
+    db.flush()  

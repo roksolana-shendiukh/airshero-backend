@@ -166,7 +166,7 @@ def assign_crew_member(
         flight_crew_id=crew_id,
     )
     db.add(row)
-    db.flush()
+    db.commit()
     return row
 
 
@@ -184,7 +184,7 @@ def remove_crew_member(
     if not row:
         return False
     db.delete(row)
-    db.flush()
+    db.commit()
     return True
 
 
@@ -238,7 +238,7 @@ def create_crew(
         flight_crew_experience_years = experience_years,
     )
     db.add(crew)
-    db.flush()
+    db.commit()
     return crew
 
 
@@ -256,13 +256,13 @@ def update_crew(
     if position_id      is not None: crew.flight_crew_position_id      = position_id
     if license_type_id  is not None: crew.flight_crew_license_type     = license_type_id
     if experience_years is not None: crew.flight_crew_experience_years = experience_years
-    db.flush()
+    db.commit()
     return crew
 
 
 def delete_crew(db: Session, crew: FlightCrew) -> None:
     db.delete(crew)
-    db.flush()
+    db.commit()
 
 
 def get_positions(db: Session):

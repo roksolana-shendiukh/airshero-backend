@@ -33,7 +33,7 @@ def insert_payment(
         payment_date_time=datetime.utcnow(),
     )
     db.add(payment)
-    db.flush()
+    db.commit()
     return payment
 
 
