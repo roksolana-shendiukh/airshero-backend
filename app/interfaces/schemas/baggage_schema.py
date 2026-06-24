@@ -3,20 +3,20 @@ from typing import List
 
 
 class BaggageUnitInputDTO(BaseModel):
-    baggage_type_id: int
-    weight_kg: float
-    dimensions: str
+    baggageTypeId: int
+    weightKg:      float
+    dimensions:    str
 
 
 class BaggageSurchargeDTO(BaseModel):
-    baggage_unit_index: int
-    reason: str
-    extra_kg: float
-    fee_per_kg: float
-    total_fee: float
+    baggageUnitIndex: int
+    reason:           str
+    extraKg:          float
+    feePerKg:         float
+    totalFee:         float
 
 
 class BaggageCheckDTO(BaseModel):
-    surcharges: List[BaggageSurchargeDTO]
-    total_surcharge: float
-    all_ok: bool
+    surcharges:     List[BaggageSurchargeDTO]
+    totalSurcharge: float
+    allOk:          bool
