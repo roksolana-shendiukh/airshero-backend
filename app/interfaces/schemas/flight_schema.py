@@ -4,46 +4,49 @@ from typing import Optional, List
 
 
 class FlightResultDTO(BaseModel):
-    flightId: int
-    flightNumber: str
-    airline: str
-    fromAirportCode: str
-    fromAirportName: str
-    toAirportCode: str
-    toAirportName: str
-    departureDateTime: str
-    arrivalDateTime: str
-    duration: str
-    flightStatus: str
+    flight_id:           int
+    flight_number:       str
+    airline:             str
+    from_airport_code:   str
+    from_airport_name:   str
+    to_airport_code:     str
+    to_airport_name:     str
+    departure_date_time: str
+    arrival_date_time:   str
+    duration:            str
+    flight_status:       str
 
 
 class FlightSearchResponseDTO(BaseModel):
     flights: List[FlightResultDTO]
-    total: int
+    total:   int
 
 
 class FlightDTO(BaseModel):
-    flightId: int
-    flightNumber: str
-    departsDatetime: datetime
-    arrivesDatetime: datetime
-    flightDuration: str
-    departsCode: str
-    departsAirport: str
-    arrivesCode: str
-    arrivesAirport: str
-    departsCity: str
-    arrivesCity: str
-    airlineName: str
-    airlineLogoUrl: Optional[str] = None
-    className: str
-    ticketPrice: float
+    flight_id:        int
+    flight_number:    str
+    departs_datetime: datetime
+    arrives_datetime: datetime
+    flight_duration:  str
+    departs_code:     str
+    departs_airport:  str
+    arrives_code:     str
+    arrives_airport:  str
+    departs_city:     str
+    arrives_city:     str
+    airline_name:     str
+    airline_logo_url: Optional[str] = None
+    class_name:       str
+    ticket_price:     float
+
 
 class FlightFilterRequestDTO(BaseModel):
-    flightIds: List[int]
-    classNames: Optional[List[str]] = None
-    minPrice: Optional[float] = None
-    maxPrice: Optional[float] = None
-    airlineNames: Optional[List[str]] = None
-    sortBy: str = "price_asc"
-    departureSlots: Optional[List[str]] = None  
+    flight_ids:      List[int]
+    class_names:     Optional[List[str]]  = None
+    min_price:       Optional[float]      = None
+    max_price:       Optional[float]      = None
+    airline_names:   Optional[List[str]]  = None
+    sort_by:         str                  = "price_asc"
+    departure_slots: Optional[List[str]]  = None
+
+    
