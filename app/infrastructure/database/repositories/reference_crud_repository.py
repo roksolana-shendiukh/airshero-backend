@@ -163,7 +163,6 @@ def update_baggage_rule(
     baggage_type_id: int,
     baggage_dimension: str | None,
     baggage_max_weight: float,
-    overweight_fee_per_kg: float,
 ) -> BaggagePricingRule | None:
     obj = get_baggage_rule(db, rule_id)
     if not obj:
@@ -171,7 +170,6 @@ def update_baggage_rule(
     obj.baggage_type_id = baggage_type_id
     obj.baggage_dimension = baggage_dimension
     obj.baggage_max_weight = baggage_max_weight
-    obj.overweight_fee_per_kg = overweight_fee_per_kg
     db.commit()
     db.refresh(obj)
     return obj
