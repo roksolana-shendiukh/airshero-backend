@@ -1,7 +1,17 @@
 from sqlalchemy.orm import Session
 from app.infrastructure.database.repositories import city_repository
 from app.interfaces.schemas.city_schema import CityDTO
+from app.infrastructure.database.repositories import route_repository
 
+def get_leg2_available_dates(db, from_city, hub_city, to_city, leg1_date):
+    return route_repository.get_leg2_dates_with_suggestions(
+        db, from_city, hub_city, to_city, leg1_date
+    )
+
+def get_leg1_connecting_dates(db, from_city, hub_city, to_city):
+    return route_repository.get_leg1_dates_with_connections(
+        db, from_city, hub_city, to_city
+    )
 
 def search_cities(db: Session, query: str) -> list[CityDTO]:
     rows = city_repository.search_cities(db, query)
