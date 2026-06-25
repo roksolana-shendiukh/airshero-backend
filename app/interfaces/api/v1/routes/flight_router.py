@@ -34,7 +34,7 @@ def get_flights_without_operation(
     db: Session = Depends(get_db),
     user=Depends(require_role("flightOperator")),
 ):
-    airline_id = user.get("airline_id")  # виправлено: "airlineId" → "airline_id"
+    airline_id = user.get("airline_id") 
     if not airline_id:
         raise HTTPException(status_code=403, detail="No airline assigned to this user")
     return flight_service.get_flights_without_operation(db, airline_id)
