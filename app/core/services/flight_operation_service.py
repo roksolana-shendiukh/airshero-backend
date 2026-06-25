@@ -1,4 +1,6 @@
 from sqlalchemy.orm import Session
+from datetime import datetime, time as time_type
+import logging
 from firebase_admin import auth as firebase_auth, firestore
 from app.infrastructure.database.models.flight_operation_model import FlightOperation, FlightOperationStatus
 from app.infrastructure.database.repositories import flight_operation_repository
@@ -7,8 +9,131 @@ from app.interfaces.schemas.flight_operation_schema import (
     FlightOperationUpdateDTO,
     FlightOperationDTO,
 )
+from app.infrastructure.database.models.flight_model import Flight
+from app.core.services import flight_crew_service
+
+
+logger = logging.getLogger(__name__)
+
 
 _TERMINAL_STATUSES = {"Completed", "Cancelled"}
+
+_TIMELINE_FIELDS = {
+    "boarding-start": "boarding_start_time",
+    "boarding-end":   "boarding_end_time",
+    "baggage-start":  "baggage_loading_start_time",
+    "baggage-end":    "baggage_loading_end_time",
+    "departure":      "actual_departure_date_time",
+    "arrival":        "actual_arrival_date_time",
+}
+
+_STEP_TO_STATUS = {
+    "boarding-start": "Boarding",
+    "boarding-end":   "Boarding",
+    "baggage-start":  "Baggage Loading",
+    "baggage-end":    "Baggage Loading",
+    "departure":      "Departed",
+    "arrival":        "Arrived",
+}
+
+_MIN_BAGGAGE_MINUTES  = 15
+_ARRIVAL_WARN_MINUTES = 60
+
+
+def get_statuses(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationStatus
+    statuses = db.query(FlightOperationStatus).all()
+    return [
+        {
+            "flight_operation_status_id":   s.flight_operation_status_id,
+            "flight_operation_status_name": s.flight_operation_status_name,
+        }
+        for s in statuses
+    ]
+
+
+def get_states(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationState
+    states = db.query(FlightOperationState).all()
+    return [
+        {
+            "state_id":    s.flight_operation_state_id,
+            "description": s.flight_operation_state_description,
+        }
+        for s in states
+    ]
+
+
+def set_timeline_step(
+    db: Session,
+    operation_id: int,
+    step: str,
+    force: bool = False,
+) -> dict:
+    now = datetime.now()
+    op  = db.query(FlightOperation).filter(
+        FlightOperation.flight_operation_id == operation_id
+    ).first()
+    if not op:
+        return None
+
+    if not force:
+        if step == "boarding-start":
+            validation = flight_crew_service.validate_crew(db, operation_id)
+            if not validation.get("valid"):
+                missing     = validation.get("missing", {})
+                missing_str = ", ".join(f"{v}x {k}" for k, v in missing.items())
+                raise ValueError(f"Crew is not complete. Missing: {missing_str}")
+
+        if step == "baggage-end" and op.baggage_loading_start_time:
+            start = op.baggage_loading_start_time
+            if isinstance(start, time_type):
+                start = datetime.combine(now.date(), start)
+            diff = (now - start).total_seconds() / 60
+            if diff < _MIN_BAGGAGE_MINUTES:
+                raise ValueError(
+                    f"Baggage loading duration is only {int(diff)} min. "
+                    f"Minimum is {_MIN_BAGGAGE_MINUTES} min."
+                )
+
+        if step == "arrival" and op.actual_departure_date_time:
+            flight = db.query(Flight).filter(
+                Flight.flight_id == op.flight_id
+            ).first()
+            if flight:
+                scheduled_duration = (
+                    flight.arrives_datetime - flight.departs_datetime
+                ).total_seconds() / 60
+                actual_duration = (now - op.actual_departure_date_time).total_seconds() / 60
+                min_duration    = scheduled_duration * 0.8
+
+                if actual_duration < min_duration:
+                    raise ValueError(
+                        f"Flight duration is only {int(actual_duration)} min, "
+                        f"but scheduled is {int(scheduled_duration)} min "
+                        f"(minimum 80% = {int(min_duration)} min)."
+                    )
+
+                delay = (now - flight.arrives_datetime).total_seconds() / 60
+                if abs(delay) > _ARRIVAL_WARN_MINUTES:
+                    direction = "late" if delay > 0 else "early"
+                    raise ValueError(
+                        f"Arrival is {int(abs(delay))} min {direction} "
+                        f"compared to schedule."
+                    )
+
+    status_name = _STEP_TO_STATUS.get(step)
+    status_id   = None
+    if status_name:
+        status = db.query(FlightOperationStatus).filter(
+            FlightOperationStatus.flight_operation_status_name == status_name
+        ).first()
+        if status:
+            status_id = status.flight_operation_status_id
+
+    field  = _TIMELINE_FIELDS[step]
+    data   = FlightOperationUpdateDTO(**{field: now}, flight_operation_status_id=status_id)
+    return update(db, operation_id, data)
 
 
 def _map(op: FlightOperation) -> FlightOperationDTO:
@@ -24,33 +149,33 @@ def _map(op: FlightOperation) -> FlightOperationDTO:
         if hasattr(t, 'strftime'):
             return t.strftime('%H:%M:%S')
         return str(t)
-    
+
     def to_datetime_str(t):
         if t is None:
             return None
         return t.isoformat()
 
     return FlightOperationDTO(
-        flightOperationId        = op.flight_operation_id,
-        flightId                 = op.flight_id,
-        flightNumber             = getattr(route, 'flight_number', None),
-        departsCode              = getattr(dep, 'airport_code', None),
-        arrivesCode              = getattr(arr, 'airport_code', None),
-        departsDatetime          = getattr(flight, 'departs_datetime', None),
-        arrivesDatetime          = getattr(flight, 'arrives_datetime', None),
-        statusId                 = op.flight_operation_status_id,
-        statusName               = getattr(op.status, 'flight_operation_status_name', None),
-        airfleetId               = op.airfleet_id,
-        aircraftModel            = getattr(op.airfleet, 'aircraft_model', None),
-        gateId                   = op.gate_id,
-        gateCode                 = getattr(op.gate, 'gate_code', None),
-        stateDescription         = getattr(op.state, 'flight_operation_state_description', None),
-        actualDepartureDatetime  = to_datetime_str(op.actual_departure_date_time),
-        actualArrivalDatetime    = to_datetime_str(op.actual_arrival_date_time),
-        boardingStartTime        = to_time_str(op.boarding_start_time),
-        boardingEndTime          = to_time_str(op.boarding_end_time),
-        baggageLoadingStartTime  = to_time_str(op.baggage_loading_start_time),
-        baggageLoadingEndTime    = to_time_str(op.baggage_loading_end_time),
+        flight_operation_id        = op.flight_operation_id,
+        schedule_flight_id         = op.schedule_flight_id,
+        flight_number              = getattr(route, 'flight_number', None),
+        departs_code               = getattr(dep, 'airport_code', None),
+        arrives_code               = getattr(arr, 'airport_code', None),
+        departs_datetime           = getattr(flight, 'departs_datetime', None),
+        arrives_datetime           = getattr(flight, 'arrives_datetime', None),
+        status_id                  = op.flight_operation_status_id,
+        status_name                = getattr(op.status, 'flight_operation_status_name', None),
+        airfleet_id                = op.airfleet_id,
+        aircraft_model             = getattr(op.airfleet, 'aircraft_model', None),
+        gate_id                    = op.gate_id,
+        gate_code                  = getattr(op.gate, 'gate_code', None),
+        state_description          = getattr(op.state, 'flight_operation_state_description', None),
+        actual_departure_datetime  = to_datetime_str(op.actual_departure_date_time),
+        actual_arrival_datetime    = to_datetime_str(op.actual_arrival_date_time),
+        boarding_start_time        = to_time_str(op.boarding_start_time),
+        boarding_end_time          = to_time_str(op.boarding_end_time),
+        baggage_loading_start_time = to_time_str(op.baggage_loading_start_time),
+        baggage_loading_end_time   = to_time_str(op.baggage_loading_end_time),
     )
 
 
@@ -58,17 +183,17 @@ def _save_to_firestore(uid: str, operation_id: int) -> None:
     db_fs = firestore.client()
     db_fs.collection("operators").document(uid)\
         .collection("operations").document(str(operation_id))\
-        .set({"operationId": operation_id})
+        .set({"operation_id": operation_id}) 
 
 
 def _clear_active_operation(uid: str, operation_id: int) -> None:
     _save_to_firestore(uid, operation_id)
     user   = firebase_auth.get_user(uid)
     claims = user.custom_claims or {}
-    print(f"[CLAIMS] Terminal status, clearing operationId for uid={uid}")
+    logger.info(f"[CLAIMS] Terminal status, clearing operation_id for uid={uid}")
     claims.pop("operationId", None)
     firebase_auth.set_custom_user_claims(uid, claims)
-    print(f"[CLAIMS] Cleared successfully")
+    logger.info(f"[CLAIMS] Cleared successfully for uid={uid}")
 
 
 def get_all(db: Session) -> list[FlightOperationDTO]:
