@@ -1,5 +1,10 @@
 from sqlalchemy.orm import Session, joinedload
-from app.infrastructure.database.models.baggage_model import BaggagePricingInFlight, BaggagePricingRule, BaggageType
+
+from app.infrastructure.database.models.baggage_model import (
+    BaggagePricingInFlight,
+    BaggagePricingRule,
+    BaggageType,
+)
 
 
 def get_baggage_options(db: Session, flight_class_id: int) -> list:
@@ -16,16 +21,16 @@ def get_baggage_options(db: Session, flight_class_id: int) -> list:
 
     return [
         {
-            "baggagePricingInFlightId": r.baggage_pricing_in_flight_id,
-            "baggagePricingRuleId":     r.baggage_pricing_rule_id,
-            "flightId":                 r.flight_id,
-            "flightClassId":            r.flight_class_id,
-            "price":                    float(r.baggage_price),
+            "baggage_pricing_in_flight_id": r.baggage_pricing_in_flight_id,
+            "baggage_pricing_rule_id":      r.baggage_pricing_rule_id,
+            "flight_id":                    r.flight_id,
+            "flight_class_id":              r.flight_class_id,
+            "price":                        float(r.baggage_price),
             "rule": {
-                "id":                 r.baggage_pricing_rule.baggage_pricing_rule_id,
-                "baggageTypeId":      r.baggage_pricing_rule.baggage_type_id,
-                "dimension":          r.baggage_pricing_rule.baggage_dimension,
-                "maxWeight":          float(r.baggage_pricing_rule.baggage_max_weight),
+                "id":                    r.baggage_pricing_rule.baggage_pricing_rule_id,
+                "baggage_type_id":       r.baggage_pricing_rule.baggage_type_id,
+                "dimension":             r.baggage_pricing_rule.baggage_dimension,
+                "max_weight":            float(r.baggage_pricing_rule.baggage_max_weight),
             },
             "type": {
                 "id":   r.baggage_pricing_rule.baggage_type.baggage_type_id,
