@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from datetime import datetime, time as time_type
 from firebase_admin import auth as firebase_auth, firestore
 from app.infrastructure.database.models.flight_operation_model import FlightOperation, FlightOperationStatus
 from app.infrastructure.database.repositories import flight_operation_repository
@@ -10,6 +11,129 @@ from app.interfaces.schemas.flight_operation_schema import (
 
 _TERMINAL_STATUSES = {"Completed", "Cancelled"}
 
+_TIMELINE_FIELDS = {
+    "boarding-start": "boarding_start_time",
+    "boarding-end":   "boarding_end_time",
+    "baggage-start":  "baggage_loading_start_time",
+    "baggage-end":    "baggage_loading_end_time",
+    "departure":      "actual_departure_date_time",
+    "arrival":        "actual_arrival_date_time",
+}
+
+_STEP_TO_STATUS = {
+    "boarding-start": "Boarding",
+    "boarding-end":   "Boarding",
+    "baggage-start":  "Baggage Loading",
+    "baggage-end":    "Baggage Loading",
+    "departure":      "Departed",
+    "arrival":        "Arrived",
+}
+
+_MIN_BAGGAGE_MINUTES  = 15
+_ARRIVAL_WARN_MINUTES = 60
+
+
+def get_statuses(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationStatus
+    statuses = db.query(FlightOperationStatus).all()
+    return [
+        {
+            "flight_operation_status_id":   s.flight_operation_status_id,
+            "flight_operation_status_name": s.flight_operation_status_name,
+        }
+        for s in statuses
+    ]
+
+
+def get_states(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationState
+    states = db.query(FlightOperationState).all()
+    return [
+        {
+            "state_id":    s.flight_operation_state_id,
+            "description": s.flight_operation_state_description,
+        }
+        for s in states
+    ]
+
+
+def set_timeline_step(
+    db: Session,
+    operation_id: int,
+    step: str,
+    force: bool = False,
+) -> dict:
+    from app.infrastructure.database.models.flight_operation_model import (
+        FlightOperation, FlightOperationStatus,
+    )
+    from app.infrastructure.database.models.flight_model import Flight
+    from app.core.services import flight_crew_service
+    from app.interfaces.schemas.flight_operation_schema import FlightOperationUpdateDTO
+
+    now = datetime.now()
+    op  = db.query(FlightOperation).filter(
+        FlightOperation.flight_operation_id == operation_id
+    ).first()
+    if not op:
+        return None
+
+    if not force:
+        if step == "boarding-start":
+            validation = flight_crew_service.validate_crew(db, operation_id)
+            if not validation.get("valid"):
+                missing     = validation.get("missing", {})
+                missing_str = ", ".join(f"{v}x {k}" for k, v in missing.items())
+                raise ValueError(f"Crew is not complete. Missing: {missing_str}")
+
+        if step == "baggage-end" and op.baggage_loading_start_time:
+            start = op.baggage_loading_start_time
+            if isinstance(start, time_type):
+                start = datetime.combine(now.date(), start)
+            diff = (now - start).total_seconds() / 60
+            if diff < _MIN_BAGGAGE_MINUTES:
+                raise ValueError(
+                    f"Baggage loading duration is only {int(diff)} min. "
+                    f"Minimum is {_MIN_BAGGAGE_MINUTES} min."
+                )
+
+        if step == "arrival" and op.actual_departure_date_time:
+            flight = db.query(Flight).filter(
+                Flight.flight_id == op.flight_id
+            ).first()
+            if flight:
+                scheduled_duration = (
+                    flight.arrives_datetime - flight.departs_datetime
+                ).total_seconds() / 60
+                actual_duration = (now - op.actual_departure_date_time).total_seconds() / 60
+                min_duration    = scheduled_duration * 0.8
+
+                if actual_duration < min_duration:
+                    raise ValueError(
+                        f"Flight duration is only {int(actual_duration)} min, "
+                        f"but scheduled is {int(scheduled_duration)} min "
+                        f"(minimum 80% = {int(min_duration)} min)."
+                    )
+
+                delay = (now - flight.arrives_datetime).total_seconds() / 60
+                if abs(delay) > _ARRIVAL_WARN_MINUTES:
+                    direction = "late" if delay > 0 else "early"
+                    raise ValueError(
+                        f"Arrival is {int(abs(delay))} min {direction} "
+                        f"compared to schedule."
+                    )
+
+    status_name = _STEP_TO_STATUS.get(step)
+    status_id   = None
+    if status_name:
+        status = db.query(FlightOperationStatus).filter(
+            FlightOperationStatus.flight_operation_status_name == status_name
+        ).first()
+        if status:
+            status_id = status.flight_operation_status_id
+
+    field  = _TIMELINE_FIELDS[step]
+    data   = FlightOperationUpdateDTO(**{field: now}, flight_operation_status_id=status_id)
+    return update(db, operation_id, data)
 
 def _map(op: FlightOperation) -> FlightOperationDTO:
     flight   = op.flight
