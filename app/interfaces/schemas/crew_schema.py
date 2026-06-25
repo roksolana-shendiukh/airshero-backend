@@ -16,3 +16,7 @@ class CrewUpdateDTO(BaseModel):
     position_id:      Optional[int] = None
     license_type_id:  Optional[int] = None
     experience_years: Optional[int] = None
+
+
+class AssignCrewRequestDTO(BaseModel):
+    crew_id: int
