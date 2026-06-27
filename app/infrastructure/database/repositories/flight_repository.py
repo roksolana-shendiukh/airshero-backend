@@ -2,6 +2,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 
+def get_flight_availability(db: Session, flight_id: int) -> list:
+    sql = text("""
+        SELECT class_name, total_seats, booked_seats, available_seats
+        FROM FN_GetFlightAvailability(:flight_id)
+    """)
+    return db.execute(sql, {"flight_id": flight_id}).fetchall()
+
+
 def search_flights(db: Session, from_city: int, to_city: int, depart_date: str):
     result = db.execute(
         text("EXEC SP_SearchFlights :departs_city_id, :arrives_city_id, :departs_date"),

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from app.interfaces.api.dependencies.auth import require_role
+
 from app.database import get_db
+from app.interfaces.api.dependencies.auth import require_role
 from app.core.services.analytics_service import get_active_users, get_top_events, get_screen_views
 from app.core.services.system_service import (
     get_server_stats,
@@ -10,7 +11,7 @@ from app.core.services.system_service import (
     get_server_history,
 )
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["Analytics"])
 _admin = Depends(require_role("systemAdmin"))
 
 
@@ -32,9 +33,9 @@ def screen_views():
 @router.get("/system", dependencies=[_admin])
 def system_analytics(db: Session = Depends(get_db)):
     return {
-        "server": get_server_stats(),
+        "server":   get_server_stats(),
         "database": get_db_stats(db),
-        "users": get_firebase_user_stats(),
+        "users":    get_firebase_user_stats(),
     }
 
 

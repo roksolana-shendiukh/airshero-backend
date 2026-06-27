@@ -11,7 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from app.config import settings
 from app.infrastructure.database.models.airline_model import Airline
-from app.interfaces.api.v1.routes.airline_controller import get_airline_logo_url
+from app.interfaces.api.v1.routes.airline_router import get_airline_logo_url
 from app.database import SessionLocal
 
 

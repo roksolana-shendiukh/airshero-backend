@@ -7,10 +7,19 @@ from app.infrastructure.database.models.flight_model import Flight
 from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
 from app.infrastructure.database.models.flight_model import Route
 from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.airfleet_model import City
 
+from app.infrastructure.database.models.airport_model import City
 logger = logging.getLogger(__name__)
 
+def get_gates(
+    db: Session,
+    flight_id:    int | None = None,
+    airport_id:   int | None = None,
+    min_capacity: int | None = None,
+):
+    if flight_id is not None:
+        return get_gates_for_flight(db, flight_id)
+    return get_all_gates(db, airport_id=airport_id, min_capacity=min_capacity)
 
 def _get_route_info(db: Session, flight_id: int) -> tuple[int | None, str]:
     flight = (

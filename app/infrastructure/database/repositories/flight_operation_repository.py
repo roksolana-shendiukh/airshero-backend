@@ -66,3 +66,44 @@ def update(db: Session, op: FlightOperation, data: FlightOperationUpdateDTO) -> 
 def delete(db: Session, op: FlightOperation) -> None:
     db.delete(op)
     db.commit()
+
+def get_statuses(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationStatus
+    statuses = db.query(FlightOperationStatus).all()
+    return [
+        {
+            "flight_operation_status_id":   s.flight_operation_status_id,
+            "flight_operation_status_name": s.flight_operation_status_name,
+        }
+        for s in statuses
+    ]
+
+def get_states(db: Session) -> list[dict]:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationState
+    states = db.query(FlightOperationState).all()
+    return [
+        {
+            "state_id":    s.flight_operation_state_id,
+            "description": s.flight_operation_state_description,
+        }
+        for s in states
+    ]
+
+def get_status_by_name(db: Session, name: str):
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationStatus
+    return db.query(FlightOperationStatus).filter(
+        FlightOperationStatus.flight_operation_status_name == name
+    ).first()
+
+def get_flight_for_operation(db: Session, flight_id: int):
+    from app.infrastructure.database.models.flight_model import Flight
+    return db.query(Flight).filter(Flight.flight_id == flight_id).first()
+
+def create_custom_state(db: Session, custom_reason: str) -> int:
+    from app.infrastructure.database.models.flight_operation_model import FlightOperationState
+    new_state = FlightOperationState(
+        flight_operation_state_description=custom_reason
+    )
+    db.add(new_state)
+    db.flush()
+    return new_state.flight_operation_state_id

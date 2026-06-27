@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from app.infrastructure.database.models.crew_model import (
     FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation, 
-    FlightCrewPosition
+    FlightCrewPosition, FlightCrewLicenseType
 )
 from app.infrastructure.database.models.airline_model import AirlineAirfleet
 from app.infrastructure.database.models.flight_operation_model import (
@@ -285,3 +285,20 @@ def crew_to_dto(c: FlightCrew) -> dict:
         "licenseTypeId":   c.flight_crew_license_type,
         "experienceYears": c.flight_crew_experience_years,
     }
+
+
+def get_operation(db: Session, operation_id: int):
+    from app.infrastructure.database.models.flight_operation_model import FlightOperation
+    return db.query(FlightOperation).filter(
+        FlightOperation.flight_operation_id == operation_id
+    ).first()
+
+def get_position_by_id(db: Session, position_id: int):
+    return db.query(FlightCrewPosition).filter(
+        FlightCrewPosition.flight_crew_position_id == position_id
+    ).first()
+
+def get_license_type_by_id(db: Session, license_type_id: int):
+    return db.query(FlightCrewLicenseType).filter(
+        FlightCrewLicenseType.flight_crew_license_type_id == license_type_id
+    ).first()
