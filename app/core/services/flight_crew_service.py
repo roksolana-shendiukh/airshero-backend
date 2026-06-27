@@ -1,20 +1,22 @@
+import logging
 from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException
-from app.infrastructure.database.models.flight_crew_model import (
-    FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation, FlightCrewPosition
+
+from app.infrastructure.database.models.crew_model import (
+    FlightCrew,
+    AirfleetFlightCrew,
+    FlightCrewPosition,
+    FlightCrewLicenseType,
 )
 from app.infrastructure.database.models.flight_operation_model import FlightOperation
-from app.infrastructure.database.repositories import flight_crew_repository
-
 from app.infrastructure.database.models.flight_model import Flight
 from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
-from app.infrastructure.database.models.route_model import Route
+from app.infrastructure.database.models.flight_model import Route
 from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.city_model import City
-from app.infrastructure.database.models.flight_crew_model import FlightCrewPosition, FlightCrewLicenseType
+from app.infrastructure.database.models.flight_model import City
+from app.infrastructure.database.repositories import flight_crew_repository
 
-
-
+logger = logging.getLogger(__name__)
 
 PILOT_POSITION            = "Pilot"
 CO_PILOT_POSITION         = "Co-Pilot"
@@ -24,14 +26,13 @@ ENGINEER_POSITION         = "Engineer"
 
 def _crew_dto(crew: FlightCrew) -> dict:
     return {
-        "flightCrewId":    crew.flight_crew_id,
-        "firstName":       crew.flight_crew_first_name,
-        "lastName":        crew.flight_crew_last_name,
+        "flight_crew_id":  crew.flight_crew_id,
+        "first_name":      crew.flight_crew_first_name,
+        "last_name":       crew.flight_crew_last_name,
         "position":        getattr(crew.position, "flight_crew_position_name", None),
-        "licenseType":     getattr(crew.license_type, "flight_crew_license_type_name", None),
-        "experienceYears": crew.flight_crew_experience_years,
+        "license_type":    getattr(crew.license_type, "flight_crew_license_type_name", None),
+        "experience_years": crew.flight_crew_experience_years,
     }
-
 
 
 def _get_operation_with_relations(db: Session, operation_id: int) -> FlightOperation | None:
@@ -58,9 +59,9 @@ def _get_operation_with_relations(db: Session, operation_id: int) -> FlightOpera
 
 
 def _get_required_positions(op: FlightOperation, db: Session) -> dict:
-    flight    = op.flight
-    schedule  = getattr(flight, "flight_schedule", None)
-    route     = getattr(schedule, "route", None)
+    flight   = op.flight
+    schedule = getattr(flight, "flight_schedule", None)
+    route    = getattr(schedule, "route", None)
 
     flight_range  = float(getattr(route, "flight_range", 0) or 0)
     airfleet      = op.airfleet
@@ -72,17 +73,14 @@ def _get_required_positions(op: FlightOperation, db: Session) -> dict:
     arr_country = getattr(getattr(arr_airport, "city", None), "country_id", None)
 
     is_international = dep_country != arr_country
-
     required = {}
 
-    # Пілоти
     if is_international or flight_range > 500:
         required[PILOT_POSITION]    = 1
         required[CO_PILOT_POSITION] = 1
     else:
         required[PILOT_POSITION] = 1
 
-    # Бортпровідники
     attendants = seat_capacity // 50
     if attendants > 0:
         required[FLIGHT_ATTENDANT_POSITION] = attendants
@@ -114,13 +112,11 @@ def get_crew(db: Session, operation_id: int) -> list[dict]:
 def get_available_crew(
     db: Session,
     operation_id: int,
-    airline_id: int,
-    search: str | None = None,
-    position: str | None = 'Pilot',
+    airline_id:   int,
+    search:       str | None = None,
+    position:     str | None = "Pilot",
 ) -> list[dict]:
-    op = db.query(FlightOperation).filter(
-        FlightOperation.flight_operation_id == operation_id
-    ).first()
+    op = flight_crew_repository.get_operation(db, operation_id)
     if not op or not op.airfleet_id:
         return []
 
@@ -128,14 +124,14 @@ def get_available_crew(
         db, operation_id, op.airfleet_id, airline_id,
         search=search, position=position,
     )
-
     return [
         {
             **_crew_dto(c),
-            "locationKnown": location_known,
+            "location_known": location_known,
         }
         for c, location_known in results
     ]
+
 
 def get_required_positions(db: Session, operation_id: int) -> dict:
     op = _get_operation_with_relations(db, operation_id)
@@ -166,8 +162,7 @@ def validate_crew(db: Session, operation_id: int) -> dict:
 
     warnings = []
     if op.airfleet_id and _has_certified_engineers(db, op.airfleet_id):
-        has_engineer = current_counts.get(ENGINEER_POSITION, 0) > 0
-        if not has_engineer:
+        if not current_counts.get(ENGINEER_POSITION, 0) > 0:
             warnings.append(
                 "This aircraft type supports engineers — consider assigning one"
             )
@@ -185,16 +180,13 @@ def assign_crew(db: Session, operation_id: int, crew_id: int, airline_id: int) -
     if any(c.flight_crew_id == crew_id for c in existing):
         raise ValueError("Crew member already assigned to this operation")
 
-    op = db.query(FlightOperation).filter(
-        FlightOperation.flight_operation_id == operation_id
-    ).first()
+    op = flight_crew_repository.get_operation(db, operation_id)
     if not op:
         raise ValueError("Operation not found")
 
     available = flight_crew_repository.get_available_crew(
-            db, operation_id, op.airfleet_id, airline_id,
-            position=None,
-        )
+        db, operation_id, op.airfleet_id, airline_id, position=None,
+    )
     if not any(c.flight_crew_id == crew_id for c, _ in available):
         raise ValueError(
             "Crew member is not certified for this aircraft, "
@@ -213,7 +205,6 @@ def assign_crew(db: Session, operation_id: int, crew_id: int, airline_id: int) -
 
             op_with_rel = _get_operation_with_relations(db, operation_id)
             required    = _get_required_positions(op_with_rel, db) if op_with_rel else {}
-
             current_count = current_counts.get(new_pos, 0)
 
             if new_pos == PILOT_POSITION and current_count >= 1:
@@ -234,11 +225,13 @@ def assign_crew(db: Session, operation_id: int, crew_id: int, airline_id: int) -
     db.commit()
     return {"ok": True}
 
+
 def remove_crew(db: Session, operation_id: int, crew_id: int) -> bool:
     result = flight_crew_repository.remove_crew_member(db, operation_id, crew_id)
     if result:
         db.commit()
     return result
+
 
 def get_all_crew(
     db:       Session,
@@ -256,10 +249,13 @@ def get_crew_by_id(db: Session, crew_id: int) -> dict:
     return flight_crew_repository.crew_to_dto(c)
 
 
-
-def validate_position_license_logic(db: Session, position_id: int, license_type_id: int):
-    pos = db.query(FlightCrewPosition).filter(FlightCrewPosition.flight_crew_position_id == position_id).first()
-    lic = db.query(FlightCrewLicenseType).filter(FlightCrewLicenseType.flight_crew_license_type_id == license_type_id).first()
+def validate_position_license_logic(
+    db: Session,
+    position_id:    int,
+    license_type_id: int,
+) -> None:
+    pos = flight_crew_repository.get_position_by_id(db, position_id)
+    lic = flight_crew_repository.get_license_type_by_id(db, license_type_id)
 
     if not pos or not lic:
         raise HTTPException(status_code=400, detail="Invalid Position or License Type ID")
@@ -268,22 +264,23 @@ def validate_position_license_logic(db: Session, position_id: int, license_type_
     lic_name = lic.flight_crew_license_type_name
 
     if pos_name in [PILOT_POSITION, CO_PILOT_POSITION]:
-        pilot_licenses = ["Private Pilot License", "Commercial Pilot License", "Airline Transport Pilot License"]
+        pilot_licenses = [
+            "Private Pilot License",
+            "Commercial Pilot License",
+            "Airline Transport Pilot License",
+        ]
         if lic_name not in pilot_licenses:
             raise HTTPException(
-                status_code=400, 
-                detail=f"{pos_name} must have a valid Pilot License (PPL, CPL, or ATPL)."
+                status_code=400,
+                detail=f"{pos_name} must have a valid Pilot License (PPL, CPL, or ATPL).",
             )
 
     if pos_name == ENGINEER_POSITION:
         if lic_name != "Flight Engineer License":
             raise HTTPException(
-                status_code=400, 
-                detail="Engineers must have a Flight Engineer License."
+                status_code=400,
+                detail="Engineers must have a Flight Engineer License.",
             )
-
-    if pos_name == FLIGHT_ATTENDANT_POSITION:
-        pass
 
 
 def create_crew(
@@ -295,7 +292,7 @@ def create_crew(
     experience_years: int,
 ) -> dict:
     validate_position_license_logic(db, position_id, license_type_id)
-    
+
     if experience_years < 0 or experience_years > 60:
         raise HTTPException(status_code=400, detail="Experience years must be between 0 and 60")
 
@@ -320,9 +317,9 @@ def update_crew(
     if not c:
         raise HTTPException(status_code=404, detail="Crew member not found")
 
-    new_pos = position_id if position_id is not None else c.flight_crew_position_id
-    new_lic = license_type_id if license_type_id is not None else c.flight_crew_license_type_id
-    
+    new_pos = position_id      if position_id      is not None else c.flight_crew_position_id
+    new_lic = license_type_id  if license_type_id  is not None else c.flight_crew_license_type_id
+
     validate_position_license_logic(db, new_pos, new_lic)
 
     flight_crew_repository.update_crew(
@@ -343,13 +340,21 @@ def delete_crew(db: Session, crew_id: int) -> None:
 
 def get_positions(db: Session) -> list[dict]:
     rows = flight_crew_repository.get_positions(db)
-    return [{"id": r.flight_crew_position_id, "name": r.flight_crew_position_name} for r in rows]
+    return [
+        {
+            "id":   r.flight_crew_position_id,
+            "name": r.flight_crew_position_name,
+        }
+        for r in rows
+    ]
 
 
 def get_license_types(db: Session) -> list[dict]:
     rows = flight_crew_repository.get_license_types(db)
-    return [{"id": r.flight_crew_license_type_id, "name": r.flight_crew_license_type_name} for r in rows]
-
-
-
-
+    return [
+        {
+            "id":   r.flight_crew_license_type_id,
+            "name": r.flight_crew_license_type_name,
+        }
+        for r in rows
+    ]
