@@ -1,9 +1,16 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from app.infrastructure.database.models.passenger_model import Passenger
 from app.infrastructure.database.models.passenger_model import PassengerDocument
 from app.interfaces.schemas.passenger_schema import PassengerCreateDTO, PassengerUpdateDTO
 
+
+def get_document_type_code(db: Session, document_type_id: int) -> str | None:
+    row = db.execute(
+        text("SELECT document_type_code FROM DocumentType WHERE document_type_id = :id"),
+        {"id": document_type_id},
+    ).fetchone()
+    return row[0] if row else None
 
 def get_by_id(db: Session, passenger_id: int) -> Passenger | None:
     return (
@@ -112,6 +119,7 @@ def update(db: Session, passenger: Passenger, data: PassengerUpdateDTO) -> Passe
         passenger.passenger_email = data.email
     db.commit()  
     return passenger
+
 
 
 def delete(db: Session, passenger: Passenger) -> None:
