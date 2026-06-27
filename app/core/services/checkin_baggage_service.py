@@ -22,16 +22,16 @@ def _find_matching_type(
 ) -> dict | None:
     fitting = [
         p for p in available_pricing
-        if _fits_in_dimension(dimension, p['baggageDimension'])
-        and weight <= p['baggageMaxWeight'] + OVERWEIGHT_TOLERANCE_KG
+        if _fits_in_dimension(dimension, p['baggage_dimension'])
+        and weight <= p['baggage_max_weight'] + OVERWEIGHT_TOLERANCE_KG
     ]
 
     if fitting:
-        return min(fitting, key=lambda p: p['baggagePrice'])
+        return min(fitting, key=lambda p: p['baggage_price'])
 
     by_size = sorted(
         available_pricing,
-        key=lambda p: sum(_parse_dimensions(p['baggageDimension'])),
+        key=lambda p: sum(_parse_dimensions(p['baggage_dimension'])),
         reverse=True,
     )
     return by_size[0] if by_size else None
@@ -44,51 +44,47 @@ def calculate_unit_charge(
     available_pricing: list[dict],
     is_extra_unit:     bool,
 ) -> dict:
-    paid_max_weight   = paid_pricing['baggageMaxWeight']
-    paid_fee_per_kg   = paid_pricing['overweightFeePerKg']
-    paid_price        = paid_pricing['baggagePrice']
-    paid_type_name    = paid_pricing['baggageTypeName']
-    paid_dimension    = paid_pricing['baggageDimension']
+    paid_max_weight = paid_pricing['baggage_max_weight']
+    paid_fee_per_kg = paid_pricing['overweight_fee_per_kg']
+    paid_price      = paid_pricing['baggage_price']
+    paid_type_name  = paid_pricing['baggage_type_name']
+    paid_dimension  = paid_pricing['baggage_dimension']
 
     if is_extra_unit:
-        matched = _find_matching_type(
-            unit_weight, unit_dimension, available_pricing
-        )
+        matched = _find_matching_type(unit_weight, unit_dimension, available_pricing)
         if matched:
             return {
-                'surcharge':            matched['baggagePrice'],
-                'newTypeName':          matched['baggageTypeName'],
-                'reason':               f"Extra bag — {matched['baggageTypeName']} full payment",
-                'requiresFullPayment':  True,
+                'surcharge':              matched['baggage_price'],
+                'new_type_name':          matched['baggage_type_name'],
+                'reason':                 f"Extra bag — {matched['baggage_type_name']} full payment",
+                'requires_full_payment':  True,
             }
         return {
-            'surcharge':            paid_price,
-            'newTypeName':          None,
-            'reason':               'Extra bag — full payment',
-            'requiresFullPayment':  True,
+            'surcharge':             paid_price,
+            'new_type_name':         None,
+            'reason':                'Extra bag — full payment',
+            'requires_full_payment': True,
         }
 
     fits_dim = _fits_in_dimension(unit_dimension, paid_dimension)
 
     if not fits_dim:
-        matched = _find_matching_type(
-            unit_weight, unit_dimension, available_pricing
-        )
-        if matched and matched['baggageTypeName'] != paid_type_name:
-            diff = matched['baggagePrice'] - paid_price
+        matched = _find_matching_type(unit_weight, unit_dimension, available_pricing)
+        if matched and matched['baggage_type_name'] != paid_type_name:
+            diff = matched['baggage_price'] - paid_price
             return {
-                'surcharge':            max(round(diff, 2), 0.0),
-                'newTypeName':          matched['baggageTypeName'],
-                'reason':               f"Size upgrade to {matched['baggageTypeName']}",
-                'requiresFullPayment':  True,
+                'surcharge':             max(round(diff, 2), 0.0),
+                'new_type_name':         matched['baggage_type_name'],
+                'reason':                f"Size upgrade to {matched['baggage_type_name']}",
+                'requires_full_payment': True,
             }
 
     if unit_weight <= paid_max_weight:
         return {
-            'surcharge':            0.0,
-            'newTypeName':          None,
-            'reason':               'Within allowance',
-            'requiresFullPayment':  False,
+            'surcharge':             0.0,
+            'new_type_name':         None,
+            'reason':                'Within allowance',
+            'requires_full_payment': False,
         }
 
     overweight = unit_weight - paid_max_weight
@@ -96,31 +92,29 @@ def calculate_unit_charge(
     if overweight <= OVERWEIGHT_TOLERANCE_KG:
         fee = round(overweight * paid_fee_per_kg, 2)
         return {
-            'surcharge':            fee,
-            'newTypeName':          None,
-            'reason':               f"{overweight:.1f}kg overweight × ${paid_fee_per_kg}/kg = ${fee}",
-            'requiresFullPayment':  False,
+            'surcharge':             fee,
+            'new_type_name':         None,
+            'reason':                f"{overweight:.1f}kg overweight × ${paid_fee_per_kg}/kg = ${fee}",
+            'requires_full_payment': False,
         }
 
-    matched = _find_matching_type(
-        unit_weight, unit_dimension, available_pricing
-    )
+    matched = _find_matching_type(unit_weight, unit_dimension, available_pricing)
 
-    if matched and matched['baggageTypeName'] != paid_type_name:
-        diff = matched['baggagePrice'] - paid_price
+    if matched and matched['baggage_type_name'] != paid_type_name:
+        diff = matched['baggage_price'] - paid_price
         return {
-            'surcharge':            max(round(diff, 2), 0.0),
-            'newTypeName':          matched['baggageTypeName'],
-            'reason':               f"Weight exceeds limit, upgraded to {matched['baggageTypeName']}",
-            'requiresFullPayment':  True,
+            'surcharge':             max(round(diff, 2), 0.0),
+            'new_type_name':         matched['baggage_type_name'],
+            'reason':                f"Weight exceeds limit, upgraded to {matched['baggage_type_name']}",
+            'requires_full_payment': True,
         }
 
     fee = round(overweight * paid_fee_per_kg, 2)
     return {
-        'surcharge':            fee,
-        'newTypeName':          None,
-        'reason':               f"{overweight:.1f}kg overweight × ${paid_fee_per_kg}/kg = ${fee}",
-        'requiresFullPayment':  False,
+        'surcharge':             fee,
+        'new_type_name':         None,
+        'reason':                f"{overweight:.1f}kg overweight × ${paid_fee_per_kg}/kg = ${fee}",
+        'requires_full_payment': False,
     }
 
 
@@ -132,30 +126,30 @@ def calculate_total_surcharge(
     """
     actual_units: [{'weight': 25.0, 'dimension': '160x80x70'}, ...]
     """
-    paid_qty     = paid_pricing['baggageQuantity']
+    paid_qty     = paid_pricing['baggage_quantity']
     total        = 0.0
     unit_results = []
 
     for i, unit in enumerate(actual_units):
         is_extra = i >= paid_qty
         result   = calculate_unit_charge(
-            unit_weight       = unit['weight'],
-            unit_dimension    = unit.get('dimension', paid_pricing['baggageDimension']),
-            paid_pricing      = paid_pricing,
-            available_pricing = available_pricing,
-            is_extra_unit     = is_extra,
+            unit_weight=       unit['weight'],
+            unit_dimension=    unit.get('dimension', paid_pricing['baggage_dimension']),
+            paid_pricing=      paid_pricing,
+            available_pricing= available_pricing,
+            is_extra_unit=     is_extra,
         )
         total += result['surcharge']
         unit_results.append({
-            'bagIndex':           i + 1,
-            'surcharge':          result['surcharge'],
-            'newTypeName':        result.get('newTypeName'),
-            'reason':             result['reason'],
-            'requiresFullPayment': result['requiresFullPayment'],
+            'bag_index':             i + 1,
+            'surcharge':             result['surcharge'],
+            'new_type_name':         result.get('new_type_name'),
+            'reason':                result['reason'],
+            'requires_full_payment': result['requires_full_payment'],
         })
 
     return {
-        'totalSurcharge': round(total, 2),
-        'hasSurcharge':   total > 0,
-        'units':          unit_results,
+        'total_surcharge': round(total, 2),
+        'has_surcharge':   total > 0,
+        'units':           unit_results,
     }
