@@ -1,26 +1,36 @@
 import time
+import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+
 from app.database import SessionLocal
-from app.interfaces.schemas.booking_schema import CreateBookingDTO, CreateGroupBookingDTO, ReserveBookingDTO, ReserveGroupBookingDTO, UpdatePassengersDTO
+from app.interfaces.schemas.booking_schema import (
+    CreateBookingDTO,
+    CreateGroupBookingDTO,
+    ReserveBookingDTO,
+    ReserveGroupBookingDTO,
+    UpdatePassengersDTO,
+)
 from app.infrastructure.database.repositories import booking_repository
 from app.core.services import passenger_service
+
+logger = logging.getLogger(__name__)
 
 
 def _insert_booking_item_with_baggage(
     db: Session,
-    booking_id: int,
-    document_id: int,
+    booking_id:      int,
+    document_id:     int,
     flight_price_id: int,
-    baggage_items: list,
+    baggage_items:   list,
 ) -> None:
     item = booking_repository.insert_booking_item(db, booking_id, document_id, flight_price_id)
     for baggage in baggage_items:
         booking_repository.insert_baggage_option(
             db,
-            booking_item_id=item.booking_item_id,
+            booking_item_id=             item.booking_item_id,
             baggage_pricing_in_flight_id=baggage.baggage_pricing_in_flight_id,
-            baggage_quantity=baggage.quantity,
+            baggage_quantity=            baggage.quantity,
         )
 
 
@@ -30,7 +40,7 @@ def _build_flight_info(db: Session, booking_id: int) -> dict:
         return {"outbound": None, "passengers": []}
 
     flights_seen: dict = {}
-    passengers: dict = {}
+    passengers:   dict = {}
 
     for row in rows:
         fid = row.flight_id
@@ -93,10 +103,9 @@ def create_booking(db: Session, data: CreateBookingDTO, auto_commit: bool = True
         if not is_available:
             raise ValueError(message)
 
-    booking_number = booking_repository.generate_unique_booking_number(db)
+    booking_number    = booking_repository.generate_unique_booking_number(db)
     pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
-
-    booking = booking_repository.insert_booking(
+    booking           = booking_repository.insert_booking(
         db, pending_status_id, data.total_amount, booking_number
     )
 
@@ -117,23 +126,22 @@ def create_booking(db: Session, data: CreateBookingDTO, auto_commit: bool = True
 
     expires_at = datetime.now() + timedelta(minutes=30)
     return {
-        "bookingId":     booking.booking_id,
-        "bookingNumber": booking_number,
-        "expiresAt":     expires_at.isoformat(),
+        "booking_id":     booking.booking_id,
+        "booking_number": booking_number,
+        "expires_at":     expires_at.isoformat(),
     }
+
 
 def create_group_booking(db: Session, data: CreateGroupBookingDTO) -> dict:
     try:
         b1 = create_booking(db, data.booking1, auto_commit=False)
         b2 = create_booking(db, data.booking2, auto_commit=False)
         db.commit()
-
         expires_at = datetime.now() + timedelta(minutes=30)
-
         return {
             "booking1":  b1,
             "booking2":  b2,
-            "expiresAt": expires_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
         }
     except Exception as e:
         db.rollback()
@@ -153,7 +161,7 @@ def validate_booking_for_payment(db: Session, booking_id: int) -> None:
 
 
 def get_adult_passengers_for_booking(db: Session, booking_id: int) -> list[dict]:
-    rows = booking_repository.get_adult_passengers(db, booking_id)
+    rows  = booking_repository.get_adult_passengers(db, booking_id)
     today = datetime.now().date()
     result = []
     for row in rows:
@@ -161,16 +169,16 @@ def get_adult_passengers_for_booking(db: Session, booking_id: int) -> list[dict]
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
         if age >= 18:
             result.append({
-                "passengerId": row.passenger_id,
-                "firstName":   row.passenger_first_name,
-                "lastName":    row.passenger_last_name,
-                "email":       row.passenger_email,
+                "passenger_id": row.passenger_id,
+                "first_name":   row.passenger_first_name,
+                "last_name":    row.passenger_last_name,
+                "email":        row.passenger_email,
             })
     return result
 
 
 def cancel_booking_if_not_paid(booking_id: int) -> None:
-    print(f"[cancel_booking_if_not_paid] Started for booking_id={booking_id}")
+    logger.info(f"[cancel_booking_if_not_paid] Started for booking_id={booking_id}")
     time.sleep(1800)
 
     db = SessionLocal()
@@ -183,21 +191,21 @@ def cancel_booking_if_not_paid(booking_id: int) -> None:
             cancelled_id = booking_repository.get_booking_status_id(db, "Cancelled")
             booking_repository.update_booking_status(db, booking_id, cancelled_id)
             db.commit()
-            print(f"[cancel_booking_if_not_paid] Booking {booking_id} cancelled")
+            logger.info(f"[cancel_booking_if_not_paid] Booking {booking_id} cancelled")
         else:
-            print(f"[cancel_booking_if_not_paid] Booking {booking_id} already paid, skipping")
+            logger.info(f"[cancel_booking_if_not_paid] Booking {booking_id} already paid, skipping")
     finally:
         db.close()
 
 
 def cancel_group_booking_if_not_paid(booking_id_1: int, booking_id_2: int) -> None:
-    print(f"[cancel_group_booking_if_not_paid] Started for bookings {booking_id_1}, {booking_id_2}")
+    logger.info(f"[cancel_group_booking_if_not_paid] Started for bookings {booking_id_1}, {booking_id_2}")
     time.sleep(1800)
 
     db = SessionLocal()
     try:
         pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
-        cancelled_id = booking_repository.get_booking_status_id(db, "Cancelled")
+        cancelled_id      = booking_repository.get_booking_status_id(db, "Cancelled")
 
         for booking_id in [booking_id_1, booking_id_2]:
             booking = booking_repository.get_booking_by_id(db, booking_id)
@@ -205,16 +213,16 @@ def cancel_group_booking_if_not_paid(booking_id_1: int, booking_id_2: int) -> No
                 continue
             if booking.booking_status_id == pending_status_id:
                 booking_repository.update_booking_status(db, booking_id, cancelled_id)
-                print(f"[cancel_group_booking_if_not_paid] Booking {booking_id} cancelled")
+                logger.info(f"[cancel_group_booking_if_not_paid] Booking {booking_id} cancelled")
             else:
-                print(f"[cancel_group_booking_if_not_paid] Booking {booking_id} already paid, skipping")
+                logger.info(f"[cancel_group_booking_if_not_paid] Booking {booking_id} already paid, skipping")
 
         db.commit()
     finally:
         db.close()
 
 
-def reserve_booking(db: Session, data, auto_commit: bool = True) -> dict:
+def reserve_booking(db: Session, data: ReserveBookingDTO, auto_commit: bool = True) -> dict:
     from collections import Counter
     flight_price_counts: Counter = Counter()
     for p in data.passengers:
@@ -229,10 +237,9 @@ def reserve_booking(db: Session, data, auto_commit: bool = True) -> dict:
         if not is_available:
             raise ValueError(message)
 
-    booking_number = booking_repository.generate_unique_booking_number(db)
+    booking_number    = booking_repository.generate_unique_booking_number(db)
     pending_status_id = booking_repository.get_booking_status_id(db, "Pending")
-
-    booking = booking_repository.insert_booking(
+    booking           = booking_repository.insert_booking(
         db, pending_status_id, data.total_amount, booking_number
     )
 
@@ -250,27 +257,27 @@ def reserve_booking(db: Session, data, auto_commit: bool = True) -> dict:
 
     expires_at = datetime.now() + timedelta(minutes=30)
     return {
-        "bookingId": booking.booking_id,
-        "bookingNumber": booking_number,
-        "expiresAt": expires_at.isoformat(),
+        "booking_id":     booking.booking_id,
+        "booking_number": booking_number,
+        "expires_at":     expires_at.isoformat(),
     }
 
 
-def reserve_group_booking(db: Session, data) -> dict:
+def reserve_group_booking(db: Session, data: ReserveGroupBookingDTO) -> dict:
     try:
         b1 = reserve_booking(db, data.booking1, auto_commit=False)
         b2 = reserve_booking(db, data.booking2, auto_commit=False)
         db.commit()
         expires_at = datetime.now() + timedelta(minutes=30)
         return {
-            "booking1": b1,
-            "booking2": b2,
-            "expiresAt": expires_at.isoformat(),
+            "booking1":   b1,
+            "booking2":   b2,
+            "expires_at": expires_at.isoformat(),
         }
     except Exception as e:
         db.rollback()
         raise ValueError(str(e))
-    
+
 
 def update_booking_passengers(db: Session, booking_id: int, data: UpdatePassengersDTO) -> None:
     booking = booking_repository.get_booking_by_id(db, booking_id)
@@ -297,16 +304,25 @@ def update_booking_passengers(db: Session, booking_id: int, data: UpdatePassenge
     db.commit()
 
 
-def get_bookings(db, skip=0, limit=50, status=None, airline_name=None, date_filter='this_month'):
+def get_bookings(
+    db: Session,
+    skip:        int = 0,
+    limit:       int = 50,
+    status:      str | None = None,
+    airline_name: str | None = None,
+    date_filter: str | None = "this_month",
+) -> list:
     return booking_repository.get_bookings(
-        db, skip=skip, limit=limit,
-        status=status,
+        db,
+        skip=        skip,
+        limit=       limit,
+        status=      status,
         airline_name=airline_name,
-        date_filter=date_filter,
+        date_filter= date_filter,
     )
 
 
-def cancel_booking(db: Session, booking_id: int):
+def cancel_booking(db: Session, booking_id: int) -> None:
     booking = booking_repository.get_booking_by_id(db, booking_id)
     if not booking:
         raise ValueError("Booking not found")
@@ -322,4 +338,3 @@ def cancel_booking(db: Session, booking_id: int):
     cancelled_id = booking_repository.get_booking_status_id(db, "Cancelled")
     booking_repository.update_booking_status(db, booking_id, cancelled_id)
     db.commit()
-
