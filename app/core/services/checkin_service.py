@@ -1,65 +1,69 @@
+import logging
 from sqlalchemy.orm import Session
-from app.infrastructure.database.repositories import checkin_repository
-import time
 from fastapi import HTTPException
+
+from app.infrastructure.database.repositories import checkin_repository
+
+logger = logging.getLogger(__name__)
 
 
 def get_passenger_booking(
     db: Session,
     document_number: str,
-    flight_number: str,
-    departs_date: str,
+    flight_number:   str,
+    departs_date:    str,
 ) -> list[dict]:
     rows = checkin_repository.get_passenger_booking(
         db, document_number, flight_number, departs_date
     )
     return [
         {
-            "bookingId":              r["booking_id"],
-            "bookingNumber":          r["booking_number"],
-            "bookingStatus":          r["booking_status"],
-            "passengerName":          r["passenger_name"],
-            "passengerSurname":       r["passenger_surname"],
-            "passengerDocumentNumber": r["passenger_document_number"],
-            "passengerDateOfBirth": str(r["passenger_date_of_birth"]) if r["passenger_date_of_birth"] else None,
-            "classId":                 r["class_id"],
-            "className":              r["class_name"],
-            "flightId":               r["flight_id"],
-            "flightOperationId":      r["flight_operation_id"],
-            "bookingItemId":           r["booking_item_id"],
-            "baggageQuantity":        r["baggage_quantity"],
-            "baggagePrice":           float(r["baggage_price"]) if r["baggage_price"] else None,
+            "booking_id":                r["booking_id"],
+            "booking_number":            r["booking_number"],
+            "booking_status":            r["booking_status"],
+            "passenger_name":            r["passenger_name"],
+            "passenger_surname":         r["passenger_surname"],
+            "passenger_document_number": r["passenger_document_number"],
+            "passenger_date_of_birth":   str(r["passenger_date_of_birth"]) if r["passenger_date_of_birth"] else None,
+            "class_id":                  r["class_id"],
+            "class_name":                r["class_name"],
+            "flight_id":                 r["flight_id"],
+            "flight_operation_id":       r["flight_operation_id"],
+            "booking_item_id":           r["booking_item_id"],
+            "baggage_quantity":          r["baggage_quantity"],
+            "baggage_price":             float(r["baggage_price"]) if r["baggage_price"] else None,
         }
         for r in rows
     ]
 
 
 def get_suggestions_for_flight(
-    db: Session, 
-    q: str, 
-    flight_number: str, 
-    departs_date: str
+    db: Session,
+    q:             str,
+    flight_number: str,
+    departs_date:  str,
 ):
     return checkin_repository.get_suggestions_for_flight(
         db, q, flight_number, departs_date
     )
 
 
-def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: list[float]) -> dict:
+def calculate_baggage_surcharge(
+    db: Session,
+    booking_item_id: int,
+    bag_weights:     list[float],
+) -> dict:
     flight_info = checkin_repository.get_flight_info_for_booking_item(db, booking_item_id)
-    print(f">>> flight_info: {flight_info}")
     if not flight_info:
         raise HTTPException(status_code=404, detail="Flight info missing")
 
     allowance = checkin_repository.get_booking_baggage_allowance(db, booking_item_id)
 
-    prepaid_qty          = (allowance.get("baggage_quantity") if allowance else 0) or 0
-    prepaid_max_w        = float(allowance.get("baggage_max_weight") or 0.0) if allowance else 0.0
+    prepaid_qty           = (allowance.get("baggage_quantity") if allowance else 0) or 0
+    prepaid_max_w         = float(allowance.get("baggage_max_weight") or 0.0) if allowance else 0.0
     prepaid_overweight_fee = float(allowance.get("overweight_fee_per_kg") or 0.0) if allowance else 0.0
 
     rules = checkin_repository.get_flight_class_baggage_rules(db, flight_info["flight_class_id"])
-    print(f">>> rules found: {len(rules)} for flight_class_id={flight_info['flight_class_id']}")
-    print(f">>> rules: {rules}")
     if not rules:
         rules = [{
             "baggage_type_id":       0,
@@ -76,7 +80,7 @@ def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: 
     for i, w in enumerate(bag_weights):
         fitting_rule = next(
             (r for r in rules if w <= float(r["baggage_max_weight"])),
-            None
+            None,
         )
 
         surcharge_for_bag = 0.0
@@ -96,12 +100,11 @@ def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: 
             else:
                 surcharge_for_bag = base_price
                 msg = "Extra bag"
-
         else:
-            applied_rule     = rules[-1]
-            base_price       = float(applied_rule["baggage_price"])
-            over             = w - float(applied_rule["baggage_max_weight"])
-            overweight_fee   = over * float(applied_rule["overweight_fee_per_kg"])
+            applied_rule   = rules[-1]
+            base_price     = float(applied_rule["baggage_price"])
+            over           = w - float(applied_rule["baggage_max_weight"])
+            overweight_fee = over * float(applied_rule["overweight_fee_per_kg"])
 
             if i < prepaid_qty:
                 if w <= prepaid_max_w + 0.5:
@@ -116,26 +119,18 @@ def calculate_baggage_surcharge(db: Session, booking_item_id: int, bag_weights: 
 
         total_surcharge += surcharge_for_bag
         bags_result.append({
-            "weight":               w,
-            "determinedTypeId":     applied_rule["baggage_type_id"],
-            "determinedTypeName":   applied_rule["baggage_type_name"],
-            "determinedDimensions": applied_rule["baggage_dimension"],
-            "isPreBookedSlot":      i < prepaid_qty,
-            "surcharge":            surcharge_for_bag,
-            "message":              msg,
+            "weight":                w,
+            "determined_type_id":    applied_rule["baggage_type_id"],
+            "determined_type_name":  applied_rule["baggage_type_name"],
+            "determined_dimensions": applied_rule["baggage_dimension"],
+            "is_pre_booked_slot":    i < prepaid_qty,
+            "surcharge":             surcharge_for_bag,
+            "message":               msg,
         })
 
     return {
-        "totalSurcharge": total_surcharge,
-        "bags":           bags_result,
-    }
-
-
-def check_already_checked_in(db: Session, booking_item_id: int) -> dict:
-    result = checkin_repository.check_already_checked_in(db, booking_item_id)
-    return {
-        "alreadyCheckedIn": result is not None,
-        "ticketNumber": result["boarding_pass_ticket_number"] if result else None,
+        "total_surcharge": total_surcharge,
+        "bags":            bags_result,
     }
 
 
@@ -162,29 +157,37 @@ def get_checked_baggage_weight(db: Session, flight_operation_id: int):
     return checkin_repository.get_checked_baggage_weight(db, flight_operation_id)
 
 
-def check_already_checked_in(db: Session, booking_item_id: int, flight_operation_id: int):
+def check_already_checked_in(
+    db: Session,
+    booking_item_id:    int,
+    flight_operation_id: int,
+) -> dict:
     result = checkin_repository.check_already_checked_in(db, booking_item_id, flight_operation_id)
     return {
-        "alreadyCheckedIn": result is not None,
-        "ticketNumber": result["boarding_pass_ticket_number"] if result else None,
+        "already_checked_in": result is not None,
+        "ticket_number":      result["boarding_pass_ticket_number"] if result else None,
     }
 
 
-def issue_with_baggage(db: Session, data, flight_operation_id: int, checkin_agent_id: int) -> dict:
+def issue_with_baggage(
+    db: Session,
+    data,
+    flight_operation_id: int,
+    checkin_agent_id:    int,
+) -> dict:
     agent = checkin_repository.get_checkin_agent_by_user_id(db, checkin_agent_id)
     if not agent:
         raise ValueError("Check-in agent not found")
-
     return checkin_repository.issue_boarding_pass_with_baggage(
-        db=db,
-        booking_item_id=data.booking_item_id,
-        seat_layout_id=data.seat_layout_id,
+        db=                 db,
+        booking_item_id=    data.booking_item_id,
+        seat_layout_id=     data.seat_layout_id,
         flight_operation_id=flight_operation_id,
-        checkin_agent_id=agent["checkin_agent_id"],
-        bags=[b.dict() for b in data.bags],
-        payment_method_id=data.payment_method_id,
-        total_surcharge=data.total_surcharge,
-        status=data.status,
+        checkin_agent_id=   agent["checkin_agent_id"],
+        bags=               [b.dict() for b in data.bags],
+        payment_method_id=  data.payment_method_id,
+        total_surcharge=    data.total_surcharge,
+        status=             data.status,
     )
 
 
@@ -201,34 +204,42 @@ def get_boarding_pass_details(db: Session, boarding_pass_id: int) -> dict | None
 
 
 def get_boarding_passes_history(
-    db, agent_id, search=None, route_city=None,
-    class_name=None, date_filter='today', skip=0, limit=50
+    db: Session,
+    agent_id:    int,
+    search:      str | None = None,
+    route_city:  str | None = None,
+    class_name:  str | None = None,
+    date_filter: str | None = "today",
+    skip:        int = 0,
+    limit:       int = 50,
 ):
     return checkin_repository.get_boarding_passes_history(
-        db, agent_id=agent_id,
-        search=search,
-        route_city=route_city,
-        class_name=class_name,
+        db,
+        agent_id=   agent_id,
+        search=     search,
+        route_city= route_city,
+        class_name= class_name,
         date_filter=date_filter,
-        skip=skip, limit=limit,
+        skip=       skip,
+        limit=      limit,
     )
 
 
-def get_baggage_units(db, boarding_pass_id):
+def get_baggage_units(db: Session, boarding_pass_id: int):
     return checkin_repository.get_baggage_units(db, boarding_pass_id)
 
 
-def get_boarding_pass_classes(db, agent_id):
+def get_boarding_pass_classes(db: Session, agent_id: int):
     return checkin_repository.get_boarding_pass_classes(db, agent_id)
 
-def get_boarding_pass_cities(db, agent_id):
+
+def get_boarding_pass_cities(db: Session, agent_id: int):
     return checkin_repository.get_boarding_pass_cities(db, agent_id)
 
 
 def reprint_boarding_pass(db: Session, boarding_pass_id: int) -> None:
     checkin_repository.reprint_boarding_pass(db, boarding_pass_id)
 
+
 def update_boarding_pass_seat(db: Session, boarding_pass_id: int, seat_layout_id: int) -> None:
     checkin_repository.update_boarding_pass_seat(db, boarding_pass_id, seat_layout_id)
-
-
