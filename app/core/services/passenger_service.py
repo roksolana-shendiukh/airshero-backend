@@ -1,14 +1,14 @@
 import re
+import logging
 from datetime import date
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from app.infrastructure.database.models.passenger_model import Passenger
-from app.infrastructure.database.models.document_model import PassengerDocument
+
 from app.interfaces.schemas.passenger_schema import PassengerDTO, PassengerCreateDTO, PassengerUpdateDTO
 from app.interfaces.schemas.document_schema import PassengerDocumentDTO
 from app.infrastructure.database.repositories import passenger_repository
 from dateutil.relativedelta import relativedelta
 
+logger = logging.getLogger(__name__)
 
 DOC_FORMATS = {
     'PAS': r'^[A-Z]{2}\d{7}$',
@@ -25,55 +25,48 @@ DOC_FORMAT_LABELS = {
 }
 
 
-# ── Mappers ───────────────────────────────────────────────────────────────────
-
-def _map_document(d: PassengerDocument) -> PassengerDocumentDTO:
+def _map_document(d) -> PassengerDocumentDTO:
     return PassengerDocumentDTO(
-        document_id=d.passenger_document_id,
-        citizenship_id=d.citizenship_id,
-        citizenship_name=getattr(d.citizenship, "citizenship_name", None),
-        document_type_id=d.document_type_id,
-        document_type_name=getattr(d.document_type, "document_type_name", None),
-        document_number=d.document_number,
-        document_date_of_issue=d.document_date_of_issue,
-        document_date_of_expire=d.document_date_of_expire,
+        document_id=             d.passenger_document_id,
+        citizenship_id=          d.citizenship_id,
+        citizenship_name=        getattr(d.citizenship, "citizenship_name", None),
+        document_type_id=        d.document_type_id,
+        document_type_name=      getattr(d.document_type, "document_type_name", None),
+        document_number=         d.document_number,
+        document_date_of_issue=  d.document_date_of_issue,
+        document_date_of_expire= d.document_date_of_expire,
     )
 
 
-def _map_passenger(p: Passenger) -> PassengerDTO | None:
+def _map_passenger(p) -> PassengerDTO | None:
     if not p.documents:
         return None
     return PassengerDTO(
-        passenger_id=p.passenger_id,
-        first_name=p.passenger_first_name,
-        last_name=p.passenger_last_name,
-        sex=p.passenger_sex,
-        email=p.passenger_email,
-        date_of_birth=p.passenger_date_of_birth,
-        documents=[_map_document(d) for d in p.documents],
+        passenger_id=  p.passenger_id,
+        first_name=    p.passenger_first_name,
+        last_name=     p.passenger_last_name,
+        sex=           p.passenger_sex,
+        email=         p.passenger_email,
+        date_of_birth= p.passenger_date_of_birth,
+        documents=     [_map_document(d) for d in p.documents],
     )
 
 
 def validate_document(
     db: Session,
-    document_type_id: int | None,
-    document_number: str | None,
-    document_date_of_issue: date | None,
+    document_type_id:        int | None,
+    document_number:         str | None,
+    document_date_of_issue:  date | None,
     document_date_of_expire: date | None,
-    date_of_birth: date | None = None,
+    date_of_birth:           date | None = None,
 ) -> None:
     if document_type_id is None or document_number is None:
         return
 
-    row = db.execute(
-        text("SELECT document_type_code FROM DocumentType WHERE document_type_id = :id"),
-        {"id": document_type_id},
-    ).fetchone()
-
-    if not row:
+    doc_code = passenger_repository.get_document_type_code(db, document_type_id)
+    if not doc_code:
         raise ValueError("Invalid document type")
 
-    doc_code = row[0]
     pattern = DOC_FORMATS.get(doc_code)
     if pattern and not re.match(pattern, document_number.upper()):
         raise ValueError(
@@ -95,6 +88,7 @@ def validate_document(
         if document_date_of_expire <= document_date_of_issue:
             raise ValueError("Document expiry date must be after issue date")
 
+
 def get_all(db: Session, skip: int = 0, limit: int = 50) -> list[PassengerDTO]:
     passengers = passenger_repository.get_all(db, skip, limit)
     return [dto for p in passengers if (dto := _map_passenger(p))]
@@ -112,62 +106,56 @@ def get_by_document_number(db: Session, document_number: str) -> PassengerDTO | 
 
 def search_passengers(
     db: Session,
-    query: str,
-    limit: int = 10,
+    query:          str,
+    limit:          int = 10,
     passenger_type: str | None = None,
-    depart_date: date | None = None,
+    depart_date:    date | None = None,
 ) -> list[PassengerDTO]:
     passengers = passenger_repository.search_partial(db, query, limit * 5)
-    
-    result =[]
-    p_type = passenger_type.lower() if passenger_type else None
-    ref_date = depart_date or date.today()
-    
+    result     = []
+    p_type     = passenger_type.lower() if passenger_type else None
+    ref_date   = depart_date or date.today()
+
     for p in passengers:
         dto = _map_passenger(p)
         if dto is None:
             continue
-        
+
         if p_type:
             if not dto.date_of_birth:
                 continue
-            
             dob = dto.date_of_birth if isinstance(dto.date_of_birth, date) \
                 else date.fromisoformat(str(dto.date_of_birth))
             age = relativedelta(ref_date, dob).years
-            
+
             if p_type == 'adult' and age < 12:
                 continue
             elif p_type == 'child' and not (3 <= age <= 11):
                 continue
-            elif p_type == 'infant' and age > 2: 
+            elif p_type == 'infant' and age > 2:
                 continue
-        
+
         result.append(dto)
         if len(result) >= limit:
             break
-    
+
     return result
 
 
 def search_documents(
     db: Session,
-    query: str,
-    limit: int = 10,
-    depart_date: date | None = None,
+    query:          str,
+    limit:          int = 10,
+    depart_date:    date | None = None,
     passenger_type: str | None = None,
 ) -> list[dict]:
     if not query:
-        return[]
-        
-    docs = passenger_repository.search_documents_partial(db, query, limit * 5)
+        return []
 
-    min_expire = None
-    if depart_date:
-        min_expire = depart_date + relativedelta(months=2)
-
-    p_type = passenger_type.lower() if passenger_type else None
-    result =[]
+    docs       = passenger_repository.search_documents_partial(db, query, limit * 5)
+    min_expire = depart_date + relativedelta(months=2) if depart_date else None
+    p_type     = passenger_type.lower() if passenger_type else None
+    result     = []
 
     for d in docs:
         if min_expire and (
@@ -179,19 +167,17 @@ def search_documents(
         if p_type:
             if not d.passenger.passenger_date_of_birth:
                 continue
-                
-            dob = d.passenger.passenger_date_of_birth
+            dob      = d.passenger.passenger_date_of_birth
             if not isinstance(dob, date):
                 dob = date.fromisoformat(str(dob))
-                
             ref_date = depart_date or date.today()
-            age = relativedelta(ref_date, dob).years
+            age      = relativedelta(ref_date, dob).years
 
             if p_type == 'adult' and age < 12:
                 continue
             elif p_type == 'child' and not (3 <= age <= 11):
                 continue
-            elif p_type == 'infant' and age > 2:  
+            elif p_type == 'infant' and age > 2:
                 continue
 
         result.append({
@@ -204,27 +190,32 @@ def search_documents(
             "document_date_of_issue":  d.document_date_of_issue,
             "document_date_of_expire": d.document_date_of_expire,
         })
-        
+
         if len(result) >= limit:
             break
 
     return result
 
+
 def create_passenger(db: Session, data: PassengerCreateDTO) -> PassengerDTO:
     validate_document(
         db,
-        document_type_id=data.document_type_id,
-        document_number=data.document_number,
-        document_date_of_issue=data.document_date_of_issue,
+        document_type_id=       data.document_type_id,
+        document_number=        data.document_number,
+        document_date_of_issue= data.document_date_of_issue,
         document_date_of_expire=data.document_date_of_expire,
-        date_of_birth=data.date_of_birth,
+        date_of_birth=          data.date_of_birth,
     )
     passenger = passenger_repository.create(db, data)
     db.commit()
     return _map_passenger(passenger_repository.get_by_id(db, passenger.passenger_id))
 
 
-def update_passenger(db: Session, passenger_id: int, data: PassengerUpdateDTO) -> PassengerDTO | None:
+def update_passenger(
+    db: Session,
+    passenger_id: int,
+    data: PassengerUpdateDTO,
+) -> PassengerDTO | None:
     p = passenger_repository.get_by_id(db, passenger_id)
     if not p:
         return None
@@ -232,11 +223,11 @@ def update_passenger(db: Session, passenger_id: int, data: PassengerUpdateDTO) -
     date_of_birth = data.date_of_birth or p.passenger_date_of_birth
     validate_document(
         db,
-        document_type_id=data.document_type_id,
-        document_number=data.document_number,
-        document_date_of_issue=data.document_date_of_issue,
+        document_type_id=       data.document_type_id,
+        document_number=        data.document_number,
+        document_date_of_issue= data.document_date_of_issue,
         document_date_of_expire=data.document_date_of_expire,
-        date_of_birth=date_of_birth,
+        date_of_birth=          date_of_birth,
     )
     passenger_repository.update(db, p, data)
     db.commit()
@@ -263,15 +254,15 @@ def get_or_create_document_id(db: Session, p_data) -> int:
             return None
 
     passenger_fields = dict(
-        first_name=p_data.first_name,
-        last_name=p_data.last_name,
-        sex=p_data.sex,
-        email=p_data.email,
-        date_of_birth=_parse_date(p_data.date_of_birth),
-        citizenship_id=p_data.citizenship_id,
-        document_type_id=p_data.document_type_id,
-        document_number=p_data.document_number,
-        document_date_of_issue=_parse_date(p_data.document_date_of_issue),
+        first_name=             p_data.first_name,
+        last_name=              p_data.last_name,
+        sex=                    p_data.sex,
+        email=                  p_data.email,
+        date_of_birth=          _parse_date(p_data.date_of_birth),
+        citizenship_id=         p_data.citizenship_id,
+        document_type_id=       p_data.document_type_id,
+        document_number=        p_data.document_number,
+        document_date_of_issue= _parse_date(p_data.document_date_of_issue),
         document_date_of_expire=_parse_date(p_data.document_date_of_expire),
     )
 
