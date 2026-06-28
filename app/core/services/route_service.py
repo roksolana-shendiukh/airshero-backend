@@ -1,7 +1,11 @@
 import math
+import logging
 from collections import deque
 from sqlalchemy.orm import Session
+
 from app.infrastructure.database.repositories import route_repository
+
+logger = logging.getLogger(__name__)
 
 
 def get_all_routes(db: Session, airline_id: int | None = None) -> list[dict]:
@@ -15,19 +19,19 @@ def get_all_routes(db: Session, airline_id: int | None = None) -> list[dict]:
         if dep.latitude is None or arr.latitude is None:
             continue
         result.append({
-            "routeId":        r.route_id,
-            "flightNumber":   r.flight_number,
-            "departsAirport": {
-                "airportId":   dep.airport_id,
-                "airportCode": dep.airport_code,
-                "latitude":    float(dep.latitude),
-                "longitude":   float(dep.longitude),
+            "route_id":      r.route_id,
+            "flight_number": r.flight_number,
+            "departs_airport": {
+                "airport_id":   dep.airport_id,
+                "airport_code": dep.airport_code,
+                "latitude":     float(dep.latitude),
+                "longitude":    float(dep.longitude),
             },
-            "arrivesAirport": {
-                "airportId":   arr.airport_id,
-                "airportCode": arr.airport_code,
-                "latitude":    float(arr.latitude),
-                "longitude":   float(arr.longitude),
+            "arrives_airport": {
+                "airport_id":   arr.airport_id,
+                "airport_code": arr.airport_code,
+                "latitude":     float(arr.latitude),
+                "longitude":    float(arr.longitude),
             },
         })
     return result
@@ -37,11 +41,10 @@ def calculate_haversine_distance(
     lat1: float, lon1: float,
     lat2: float, lon2: float,
 ) -> float:
-    R = 6371.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
+    R            = 6371.0
+    phi1, phi2   = math.radians(lat1), math.radians(lat2)
+    delta_phi    = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
-
     a = (
         math.sin(delta_phi / 2.0) ** 2
         + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
@@ -51,14 +54,14 @@ def calculate_haversine_distance(
 
 
 def find_all_connecting_flights(
-    graph: dict,
+    graph:     dict,
     start_city: int,
-    end_city: int,
-    max_stops: int = 1,
-):
-    queue = deque([(start_city, [start_city])])
+    end_city:   int,
+    max_stops:  int = 1,
+) -> list:
+    queue      = deque([(start_city, [start_city])])
     valid_paths = []
-    max_edges = max_stops + 1
+    max_edges  = max_stops + 1
 
     while queue:
         current, path = queue.popleft()
@@ -77,27 +80,27 @@ def find_all_connecting_flights(
     return valid_paths
 
 
-def get_flight_alternatives(db: Session, from_city: int, to_city: int):
+def get_flight_alternatives(db: Session, from_city: int, to_city: int) -> dict:
     airports_data = route_repository.get_all_airports_with_cities(db)
-    routes_data = route_repository.get_all_route_connections(db)
+    routes_data   = route_repository.get_all_route_connections(db)
 
-    graph = {}
-    valid_direct_destinations = set()
+    graph                      = {}
+    valid_direct_destinations  = set()
     for r in routes_data:
         u, v = r["from_id"], r["to_id"]
-        w = float(r["flight_range"] or 1.0)
+        w    = float(r["flight_range"] or 1.0)
         graph.setdefault(u, []).append((v, w))
         if u == from_city:
             valid_direct_destinations.add(v)
 
     target_airports = [a for a in airports_data if a["city_id"] == to_city]
     if not target_airports:
-        return {"nearbyCities": [], "connectingHubs": []}
+        return {"nearby_cities": [], "connecting_hubs": []}
 
     target_lat = float(target_airports[0]["latitude"])
     target_lon = float(target_airports[0]["longitude"])
 
-    nearby_cities = []
+    nearby_cities      = []
     seen_nearby_cities = set()
 
     for a in airports_data:
@@ -111,9 +114,9 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
         )
         if dist <= 100.0 and a["city_id"] in valid_direct_destinations:
             nearby_cities.append({
-                "cityId":     a["city_id"],
-                "cityName":   a["city_name"],
-                "distanceKm": int(dist),
+                "city_id":     a["city_id"],
+                "city_name":   a["city_name"],
+                "distance_km": int(dist),
             })
             seen_nearby_cities.add(a["city_id"])
 
@@ -122,7 +125,7 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
     )
 
     connecting_hubs = []
-    seen_hubs = set()
+    seen_hubs       = set()
 
     for path in connecting_paths:
         if len(path) != 3:
@@ -135,11 +138,11 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
         has_valid_pair = route_repository.hub_has_valid_schedule(
             db,
             from_city_id=from_city,
-            hub_city_id=hub_id,
-            to_city_id=to_city,
+            hub_city_id= hub_id,
+            to_city_id=  to_city,
         )
 
-        print(f"Hub {hub_id}: has_valid_pair={has_valid_pair}")
+        logger.debug(f"Hub {hub_id}: has_valid_pair={has_valid_pair}")
 
         if not has_valid_pair:
             continue
@@ -149,16 +152,12 @@ def get_flight_alternatives(db: Session, from_city: int, to_city: int):
             "Connecting Hub",
         )
         connecting_hubs.append({
-            "cityId":   hub_id,
-            "cityName": hub_name,
+            "city_id":   hub_id,
+            "city_name": hub_name,
         })
         seen_hubs.add(hub_id)
 
     return {
-        "nearbyCities":   nearby_cities,
-        "connectingHubs": connecting_hubs,
+        "nearby_cities":   nearby_cities,
+        "connecting_hubs": connecting_hubs,
     }
-
-
-    
-
