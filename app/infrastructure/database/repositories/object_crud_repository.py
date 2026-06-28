@@ -362,3 +362,7 @@ def get_all_countries(db: Session):
 def get_all_cities(db: Session):
     return db.query(City).order_by(City.city_name).all()
 
+def get_all_airports(db: Session) -> list:
+    from app.infrastructure.database.models.airport_model import Airport
+    return db.query(Airport).all()
+
