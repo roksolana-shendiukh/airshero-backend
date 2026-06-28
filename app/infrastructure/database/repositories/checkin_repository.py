@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 def get_passenger_booking(
     db: Session,
     document_number: str,
-    flight_number: str,
-    departs_date: str,
+    flight_number:   str,
+    departs_date:    str,
 ):
     result = db.execute(
         text("EXEC SP_GetPassengerBooking :document_number, :flight_number, :departs_date"),
@@ -46,26 +46,30 @@ def get_seat_map(db: Session, flight_operation_id: int) -> dict | None:
         return None
 
     return {
-        "flightOperationId": flight_operation_id,
+        "flight_operation_id": flight_operation_id,
         "seats": [
             {
-                "seatLayoutId":    r["seat_layout_id"],
-                "seatPosition":    r["seat_position"],
+                "seat_layout_id":  r["seat_layout_id"],
+                "seat_position":   r["seat_position"],
                 "row":             r["seat_layout_rows"],
                 "column":          r["seat_layout_columns"],
-                "classId":         r["class_id"],
-                "className":       r["class_name"],
-                "seatTypeId":      r["seat_type_id"],
-                "seatTypeName":    r["seat_type_name"],
-                "isEmergencyExit": bool(r["is_emergency_exit"]),
-                "isOccupied":      bool(r["is_occupied"]),
+                "class_id":        r["class_id"],
+                "class_name":      r["class_name"],
+                "seat_type_id":    r["seat_type_id"],
+                "seat_type_name":  r["seat_type_name"],
+                "is_emergency_exit": bool(r["is_emergency_exit"]),
+                "is_occupied":     bool(r["is_occupied"]),
             }
             for r in rows
         ],
     }
 
 
-def get_active_flights_for_agent(db: Session, airport_id: int, airline_id: int | None = None) -> list:
+def get_active_flights_for_agent(
+    db: Session,
+    airport_id:  int,
+    airline_id:  int | None = None,
+) -> list:
     rows = db.execute(text("""
         SELECT
             fo.flight_operation_id,
@@ -106,19 +110,19 @@ def get_active_flights_for_agent(db: Session, airport_id: int, airline_id: int |
     logger.debug("active flights rows: %d", len(rows))
     return [
         {
-            "flightOperationId":  r["flight_operation_id"],
-            "flightId":           r["flight_id"],
-            "flightNumber":       r["flight_number"],
-            "departsDate":        str(r["departs_date"]),
-            "departsCountryId":   r["departs_country_id"],
-            "arrivesCountryId":   r["arrives_country_id"],
-            "departsAirport":     r["departs_airport_code"],
-            "arrivesAirport":     r["arrives_airport_code"],
-            "arrivesAirportName": r["arrives_airport_name"],
-            "status":             r["status"],
-            "gateCode":           r["gate_code"],
-            "boardingStartTime":  str(r["boarding_start_time"]) if r["boarding_start_time"] else None,
-            "boardingEndTime":    str(r["boarding_end_time"])   if r["boarding_end_time"]   else None,
+            "flight_operation_id":  r["flight_operation_id"],
+            "flight_id":            r["flight_id"],
+            "flight_number":        r["flight_number"],
+            "departs_date":         str(r["departs_date"]),
+            "departs_country_id":   r["departs_country_id"],
+            "arrives_country_id":   r["arrives_country_id"],
+            "departs_airport":      r["departs_airport_code"],
+            "arrives_airport":      r["arrives_airport_code"],
+            "arrives_airport_name": r["arrives_airport_name"],
+            "status":               r["status"],
+            "gate_code":            r["gate_code"],
+            "boarding_start_time":  str(r["boarding_start_time"]) if r["boarding_start_time"] else None,
+            "boarding_end_time":    str(r["boarding_end_time"])   if r["boarding_end_time"]   else None,
         }
         for r in rows
     ]
@@ -197,12 +201,12 @@ def get_baggage_info(db: Session, booking_item_id: int) -> dict | None:
     if not row:
         return None
     return {
-        "bookingItemId":    row["booking_item_id"],
-        "baggageQuantity":  row["baggage_quantity"],
-        "baggageMaxWeight": float(row["baggage_max_weight"]),
-        "baggageTypeId":    row["baggage_type_id"],
-        "baggageTypeName":  row["baggage_type_name"],
-        "classId":          row["class_id"],
+        "booking_item_id":   row["booking_item_id"],
+        "baggage_quantity":  row["baggage_quantity"],
+        "baggage_max_weight": float(row["baggage_max_weight"]),
+        "baggage_type_id":   row["baggage_type_id"],
+        "baggage_type_name": row["baggage_type_name"],
+        "class_id":          row["class_id"],
     }
 
 
@@ -213,7 +217,10 @@ def get_baggage_types(db: Session) -> list:
         WHERE baggage_type_name != 'Carry-on baggage'
         ORDER BY baggage_type_id
     """)).mappings().all()
-    return [{"baggageTypeId": r["baggage_type_id"], "baggageTypeName": r["baggage_type_name"]} for r in rows]
+    return [
+        {"baggage_type_id": r["baggage_type_id"], "baggage_type_name": r["baggage_type_name"]}
+        for r in rows
+    ]
 
 
 def get_checked_baggage_weight(db: Session, flight_operation_id: int) -> dict:
@@ -229,8 +236,8 @@ def get_checked_baggage_weight(db: Session, flight_operation_id: int) -> dict:
     """), {"flight_operation_id": flight_operation_id}).mappings().first()
 
     return {
-        "totalCheckedWeightKg": float(weight["total_weight"])       if weight   else 0.0,
-        "baggageCapacityKg":    float(capacity["baggage_capacity"]) if capacity else 0.0,
+        "total_checked_weight_kg": float(weight["total_weight"])       if weight   else 0.0,
+        "baggage_capacity_kg":     float(capacity["baggage_capacity"]) if capacity else 0.0,
     }
 
 
@@ -287,19 +294,38 @@ def get_payment_methods(db: Session) -> list:
         FROM PaymentMethod
         ORDER BY payment_method_id
     """)).mappings().all()
-    return [{"paymentMethodId": r["payment_method_id"], "paymentMethodName": r["payment_method_name"]} for r in rows]
+    return [
+        {"payment_method_id": r["payment_method_id"], "payment_method_name": r["payment_method_name"]}
+        for r in rows
+    ]
 
 
 def issue_boarding_pass_with_baggage(
     db: Session,
-    booking_item_id: int,
-    seat_layout_id: int,
-    checkin_agent_flight_operation_id: int,
-    bags: list[dict],
-    payment_method_id: int | None,
-    total_surcharge: float,
-    status: str,
+    booking_item_id:     int,
+    seat_layout_id:      int,
+    flight_operation_id: int,
+    checkin_agent_id:    int,
+    bags:                list[dict],
+    payment_method_id:   int | None,
+    total_surcharge:     float,
+    status:              str,
 ) -> dict:
+    cafo = db.execute(text("""
+        SELECT checkInAgent_flightOperation_id
+        FROM CheckInAgentFlightOperation
+        WHERE checkin_agent_id = :agent_id
+          AND flight_operation_id = :operation_id
+    """), {
+        "agent_id":     checkin_agent_id,
+        "operation_id": flight_operation_id,
+    }).mappings().first()
+
+    if not cafo:
+        raise ValueError("Agent is not assigned to this flight operation")
+
+    checkin_agent_flight_operation_id = cafo["checkInAgent_flightOperation_id"]
+
     existing = db.execute(text("""
         SELECT bp.boarding_pass_id, bp.boarding_pass_ticket_number
         FROM BoardingPass bp
@@ -357,10 +383,10 @@ def issue_boarding_pass_with_baggage(
             "weight":           0,
         })
         bag_details.append({
-            "trackingNumber":  carryon_tracking,
-            "baggageTypeId":   carryon_type_id,
-            "baggageTypeName": "Carry-on baggage",
-            "weightKg":        0.0,
+            "tracking_number":  carryon_tracking,
+            "baggage_type_id":  carryon_type_id,
+            "baggage_type_name": "Carry-on baggage",
+            "weight_kg":        0.0,
         })
 
     bag_ids = []
@@ -386,10 +412,10 @@ def issue_boarding_pass_with_baggage(
         """), {"type_id": bag["baggage_type_id"]}).mappings().first()
 
         bag_details.append({
-            "trackingNumber":  tracking,
-            "baggageTypeId":   bag["baggage_type_id"],
-            "baggageTypeName": type_row["baggage_type_name"] if type_row else "—",
-            "weightKg":        float(bag["baggage_unit_weight_kg"]),
+            "tracking_number":   tracking,
+            "baggage_type_id":   bag["baggage_type_id"],
+            "baggage_type_name": type_row["baggage_type_name"] if type_row else "—",
+            "weight_kg":         float(bag["baggage_unit_weight_kg"]),
         })
 
     checkin_payment_id = None
@@ -419,11 +445,11 @@ def issue_boarding_pass_with_baggage(
 
     db.commit()
     return {
-        "boardingPassId":   boarding_pass_id,
-        "ticketNumber":     ticket_number,
-        "checkinPaymentId": checkin_payment_id,
-        "bagCount":         len(bag_details),
-        "bags":             bag_details,
+        "boarding_pass_id":   boarding_pass_id,
+        "ticket_number":      ticket_number,
+        "checkin_payment_id": checkin_payment_id,
+        "bag_count":          len(bag_details),
+        "bags":               bag_details,
     }
 
 
@@ -433,7 +459,11 @@ def get_checkin_agent_by_user_id(db: Session, agent_id: int):
     """), {"agent_id": agent_id}).mappings().first()
 
 
-def check_already_checked_in(db: Session, booking_item_id: int, checkin_agent_flight_operation_id: int) -> dict | None:
+def check_already_checked_in(
+    db: Session,
+    booking_item_id:                   int,
+    checkin_agent_flight_operation_id: int,
+) -> dict | None:
     row = db.execute(text("""
         SELECT bp.boarding_pass_id, bp.boarding_pass_ticket_number
         FROM BoardingPass bp
@@ -468,7 +498,11 @@ def get_boarding_stats(db: Session, flight_operation_id: int) -> dict:
 
     total      = row["total_passengers"] if row else 0
     checked_in = row["checked_in"]       if row else 0
-    return {"totalPassengers": total, "checkedIn": checked_in, "remaining": total - checked_in}
+    return {
+        "total_passengers": total,
+        "checked_in":       checked_in,
+        "remaining":        total - checked_in,
+    }
 
 
 def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
@@ -508,15 +542,15 @@ def get_recently_checked_in(db: Session, flight_operation_id: int) -> list:
 
     return [
         {
-            "boardingPassId":    r["boarding_pass_id"],
-            "ticketNumber":      r["boarding_pass_ticket_number"],
-            "passengerName":     f"{r['passenger_first_name']} {r['passenger_last_name']}",
-            "seat":              r["seat_position"],
-            "classId":           r["class_id"],
-            "className":         r["class_name"],
-            "issuedAt":          str(r["boarding_pass_issue_date_time"]),
-            "flightOperationId": r["flight_operation_id"],
-            "bagCount":          r["bag_count"],
+            "boarding_pass_id":    r["boarding_pass_id"],
+            "ticket_number":       r["boarding_pass_ticket_number"],
+            "passenger_name":      f"{r['passenger_first_name']} {r['passenger_last_name']}",
+            "seat":                r["seat_position"],
+            "class_id":            r["class_id"],
+            "class_name":          r["class_name"],
+            "issued_at":           str(r["boarding_pass_issue_date_time"]),
+            "flight_operation_id": r["flight_operation_id"],
+            "bag_count":           r["bag_count"],
         }
         for r in rows
     ]
@@ -568,28 +602,28 @@ def get_boarding_pass_details(db: Session, boarding_pass_id: int) -> dict | None
     if not row:
         return None
     return {
-        "ticketNumber":   row["boarding_pass_ticket_number"],
-        "passengerName":  f"{row['passenger_first_name']} {row['passenger_last_name']}",
-        "flightNumber":   row["flight_number"],
-        "flightClass":    row["class_name"],
-        "seat":           row["seat_position"],
-        "departsDate":    str(row["departs_date"]),
-        "departsAirport": row["departs_airport"],
-        "arrivesAirport": row["arrives_airport"],
-        "gate":           row["gate_code"],
-        "bagCount":       row["bag_count"],
+        "ticket_number":   row["boarding_pass_ticket_number"],
+        "passenger_name":  f"{row['passenger_first_name']} {row['passenger_last_name']}",
+        "flight_number":   row["flight_number"],
+        "flight_class":    row["class_name"],
+        "seat":            row["seat_position"],
+        "departs_date":    str(row["departs_date"]),
+        "departs_airport": row["departs_airport"],
+        "arrives_airport": row["arrives_airport"],
+        "gate":            row["gate_code"],
+        "bag_count":       row["bag_count"],
     }
 
 
 def get_boarding_passes_history(
     db: Session,
-    agent_id: int,
-    search: str | None = None,
-    route_city: str | None = None,
-    class_name: str | None = None,
+    agent_id:    int,
+    search:      str | None = None,
+    route_city:  str | None = None,
+    class_name:  str | None = None,
     date_filter: str | None = "today",
-    skip: int = 0,
-    limit: int = 50,
+    skip:        int = 0,
+    limit:       int = 50,
 ) -> list:
     date_condition = ""
     if date_filter == "today":
@@ -684,19 +718,19 @@ def get_boarding_passes_history(
     rows = db.execute(sql, params).mappings().all()
     return [
         {
-            "boardingPassId":  r["boarding_pass_id"],
-            "ticketNumber":    r["boarding_pass_ticket_number"],
-            "issuedAt":        str(r["boarding_pass_issue_date_time"]),
-            "passengerName":   f"{r['passenger_first_name']} {r['passenger_last_name']}",
-            "flightNumber":    r["flight_number"],
-            "departsDate":     str(r["departs_date"]),
-            "departsAirport":  r["departs_airport"],
-            "arrivesAirport":  r["arrives_airport"],
-            "departsCity":     r["departs_city"],
-            "arrivesCity":     r["arrives_city"],
-            "className":       r["class_name"],
-            "seat":            r["seat_position"],
-            "bagCount":        r["bag_count"],
+            "boarding_pass_id": r["boarding_pass_id"],
+            "ticket_number":    r["boarding_pass_ticket_number"],
+            "issued_at":        str(r["boarding_pass_issue_date_time"]),
+            "passenger_name":   f"{r['passenger_first_name']} {r['passenger_last_name']}",
+            "flight_number":    r["flight_number"],
+            "departs_date":     str(r["departs_date"]),
+            "departs_airport":  r["departs_airport"],
+            "arrives_airport":  r["arrives_airport"],
+            "departs_city":     r["departs_city"],
+            "arrives_city":     r["arrives_city"],
+            "class_name":       r["class_name"],
+            "seat":             r["seat_position"],
+            "bag_count":        r["bag_count"],
         }
         for r in rows
     ]
@@ -716,10 +750,10 @@ def get_baggage_units(db: Session, boarding_pass_id: int) -> list:
     """), {"boarding_pass_id": boarding_pass_id}).mappings().all()
     return [
         {
-            "baggageUnitId":   r["baggage_unit_id"],
-            "trackingNumber":  r["baggage_unit_tracking_number"],
-            "weightKg":        float(r["baggage_unit_weight_kg"]),
-            "baggageTypeName": r["baggage_type_name"],
+            "baggage_unit_id":  r["baggage_unit_id"],
+            "tracking_number":  r["baggage_unit_tracking_number"],
+            "weight_kg":        float(r["baggage_unit_weight_kg"]),
+            "baggage_type_name": r["baggage_type_name"],
         }
         for r in rows
     ]
