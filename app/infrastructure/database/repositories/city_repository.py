@@ -1,14 +1,11 @@
 from sqlalchemy.orm import Session, aliased
-from sqlalchemy import text, or_
+from sqlalchemy import text
 from datetime import date, datetime, timedelta
 
 from app.infrastructure.database.models.airport_model import Airport
 from app.infrastructure.database.models.flight_model import Flight, Route
 from app.infrastructure.database.models.flight_operation_model import (
     ScheduledFlight, FlightStatus
-)
-from app.infrastructure.database.models.flight_schedule_model import (
-    FlightSchedule, FlightSeason
 )
 
 
