@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.database.models.passenger_model import Citizenship
 from app.infrastructure.database.models.passenger_model import DocumentType
+
 from app.infrastructure.database.models.payment_model import PaymentMethod, PaymentStatus
 from app.infrastructure.database.models.baggage_model import BaggageType
 
