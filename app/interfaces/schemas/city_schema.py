@@ -2,6 +2,6 @@ from pydantic import BaseModel
 
 
 class CityDTO(BaseModel):
-    cityId: int
-    cityName: str
-    countryName: str
+    city_id:      int
+    city_name:    str
+    country_name: str

@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.interfaces.api.dependencies.auth import require_role
-from app.infrastructure.database.repositories import baggage_repository
+from app.core.services import baggage_service
 
 router = APIRouter(prefix="/baggage", tags=["Baggage"])
 
@@ -14,7 +14,4 @@ def get_baggage_options(
     db: Session = Depends(get_db),
     user=Depends(require_role("salesAgent")),
 ):
-    try:
-        return baggage_repository.get_baggage_options(db, flight_class_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return baggage_service.get_baggage_options(db, flight_class_id)

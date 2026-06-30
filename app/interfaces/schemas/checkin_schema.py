@@ -1,78 +1,82 @@
-from pydantic import BaseModel,field_validator
+from pydantic import BaseModel, field_validator
 from datetime import date, datetime
 from typing import Optional, List
 from .baggage_schema import BaggageUnitInputDTO
 
+
 class DocumentInfoDTO(BaseModel):
-    document_id: int
-    document_number: str
-    document_type_name: Optional[str]
-    citizenship_name: Optional[str]
-    document_date_of_expire: Optional[date]
-    is_valid: bool
+    document_id:              int
+    document_number:          str
+    document_type_name:       Optional[str]
+    citizenship_name:         Optional[str]
+    document_date_of_expire:  Optional[date]
+    is_valid:                 bool
 
 
 class BookingItemDTO(BaseModel):
-    booking_item_id: int
-    passenger_id: int
-    first_name: str
-    last_name: str
-    date_of_birth: Optional[date]
-    document: DocumentInfoDTO
-    class_name: str
-    flight_number: str
-    departs_datetime: datetime
-    arrives_datetime: datetime
+    booking_item_id:      int
+    passenger_id:         int
+    first_name:           str
+    last_name:            str
+    date_of_birth:        Optional[date]
+    document:             DocumentInfoDTO
+    class_name:           str
+    flight_number:        str
+    departs_datetime:     datetime
+    arrives_datetime:     datetime
     departs_airport_code: str
     arrives_airport_code: str
-    baggage_type_name: Optional[str]
-    baggage_quantity: Optional[int]
-    baggage_max_weight: Optional[float]
-    is_checked_in: bool
+    baggage_type_name:    Optional[str]
+    baggage_quantity:     Optional[int]
+    baggage_max_weight:   Optional[float]
+    is_checked_in:        bool
 
 
 class BookingDetailsDTO(BaseModel):
-    booking_id: int
+    booking_id:     int
     booking_number: str
     booking_status: str
     payment_status: Optional[str]
-    total_amount: float
-    items: List[BookingItemDTO]
+    total_amount:   float
+    items:          List[BookingItemDTO]
 
 
 class CheckinPaymentInputDTO(BaseModel):
     payment_method_id: int
-    amount: float
+    amount:            float
 
 
 class IssueBoardingPassDTO(BaseModel):
-    booking_item_id: int
-    seat_layout_id: int
-    baggage_units: List[BaggageUnitInputDTO] = []
-    checkin_payment: Optional[CheckinPaymentInputDTO] = None
+    booking_item_id:  int
+    seat_layout_id:   int
+    baggage_units:    List[BaggageUnitInputDTO] = []
+    checkin_payment:  Optional[CheckinPaymentInputDTO] = None
 
 
 class CalculateBaggageRequestDTO(BaseModel):
-    bagWeights: List[float]
+    bag_weights: List[float]
 
-class BagDetail(BaseModel):
-    weight: float
-    determinedTypeId: int = 0
-    determinedTypeName: str
-    determinedDimensions: str
-    isPreBookedSlot: bool
-    surcharge: float
-    message: str
+
+class BagDetailDTO(BaseModel):
+    weight:                float
+    determined_type_id:    int = 0
+    determined_type_name:  str
+    determined_dimensions: str
+    is_pre_booked_slot:    bool
+    surcharge:             float
+    message:               str
+
 
 class AllowanceDTO(BaseModel):
-    quantity: int
-    maxWeight: float
-    typeName: str
+    quantity:   int
+    max_weight: float
+    type_name:  str
+
 
 class CalculateBaggageResponseDTO(BaseModel):
-    preBookedAllowance: Optional[AllowanceDTO] = None
-    totalSurcharge: float
-    bags: List[BagDetail]
+    pre_booked_allowance: Optional[AllowanceDTO] = None
+    total_surcharge:      float
+    bags:                 List[BagDetailDTO]
 
 
 class BagUnitDTO(BaseModel):
@@ -94,4 +98,3 @@ class IssueCheckinDTO(BaseModel):
         if v not in ('Paid', 'Failed', 'Pending'):
             raise ValueError('status must be Paid, Failed or Pending')
         return v
-    

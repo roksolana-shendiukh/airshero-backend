@@ -2,12 +2,12 @@ from pydantic import BaseModel
 
 
 class AirfleetDTO(BaseModel):
-    airfleetId:              int
-    aircraftModel:           str
-    manufacturerName:        str | None = None
-    seatCapacity:            int | None = None
-    aircraftRangeKm:         float | None = None
-    aircraftSpeed:           float | None = None
-    baggageCapacity:         float | None = None
-    aircraftFuelConsumption: float | None = None
-    aircraftUrl:             str | None = None
+    airfleet_id:               int
+    aircraft_model:            str
+    manufacturer_name:         str | None = None
+    seat_capacity:             int | None = None
+    aircraft_range_km:         float | None = None
+    aircraft_speed:            float | None = None
+    baggage_capacity:          float | None = None
+    aircraft_fuel_consumption: float | None = None
+    aircraft_url:              str | None = None

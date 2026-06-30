@@ -3,9 +3,9 @@ from typing import Optional
 
 
 class PaymentDTO(BaseModel):
-    paymentMethodId: int
-    amount: float
-    status: str
-    email: Optional[str] = None
-    passengerId: Optional[int] = None
-    booking_id_2: Optional[int] = None
+    payment_method_id: int
+    amount:            float
+    status:            str
+    email:             Optional[str] = None
+    passenger_id:      Optional[int] = None
+    booking_id:      Optional[int] = None

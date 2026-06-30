@@ -3,10 +3,10 @@ from typing import Optional
 
 
 class GateDTO(BaseModel):
-    gateId:       int
-    gateCode:     str
-    terminalId:   int
-    terminalCode: Optional[str]   = None
-    terminalSize: Optional[float] = None
-    terminalType: Optional[str]   = None
-    isAvailable:  bool            = True
+    gate_id:       int
+    gate_code:     str
+    terminal_id:   int
+    terminal_code: Optional[str]   = None
+    terminal_size: Optional[float] = None
+    terminal_type: Optional[str]   = None
+    is_available:  bool            = True
