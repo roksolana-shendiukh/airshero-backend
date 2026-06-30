@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 from app.infrastructure.database.models.airfleet_model import Airfleet, AirfleetManufacturer
 from app.infrastructure.database.models.seat_model import SeatLayout, SeatType
-from app.infrastructure.database.models.seat_model import Class
 
 def get_all_manufacturers(db: Session) -> list:
     return db.query(AirfleetManufacturer).order_by(

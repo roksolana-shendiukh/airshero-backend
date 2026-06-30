@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.interfaces.api.v1.routes import admin_controller, airfleet_crud_controller, airfleet_router, airline_router, airport_router, analytics_router, auth_controller, baggage_router, booking_router, checkin_router, city_router, crew_router, flight_crew_router, flight_operation_router, flight_router, gate_router, object_crud_controller, passenger_router, planning_router, reference_crud_router, reference_router, route_router
+from app.interfaces.api.v1.routes import admin_router, airfleet_router, airline_router, airport_router, analytics_router, auth_controller, baggage_router, booking_router, checkin_router, city_router, crew_router, flight_crew_router, flight_operation_router, flight_router, gate_router, object_crud_router, passenger_router, planning_router, reference_crud_router, reference_router, route_router
 from app.core.services.system_service import record_snapshot
 from contextlib import asynccontextmanager
 
@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.database import engine
 from app.interfaces.api.v1.routes import (
-    user_controller
+    user_router
 )
 
 scheduler = BackgroundScheduler()
@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_controller.router)
-app.include_router(admin_controller.router)
+app.include_router(admin_router.router)
 app.include_router(passenger_router.router)
 app.include_router(booking_router.router)
 app.include_router(baggage_router.router)
@@ -51,11 +51,10 @@ app.include_router(flight_crew_router.router)
 app.include_router(planning_router.router)
 app.include_router(airline_router.router)
 app.include_router(analytics_router.router)
-app.include_router(user_controller.router)
+app.include_router(user_router.router)
 app.include_router(crew_router.router)
-app.include_router(object_crud_controller.router)
+app.include_router(object_crud_router.router)
 app.include_router(reference_router.router)
-app.include_router(airfleet_crud_controller.router)
 
 
 @app.on_event("startup")

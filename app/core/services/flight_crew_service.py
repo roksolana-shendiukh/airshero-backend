@@ -4,16 +4,16 @@ from fastapi import HTTPException
 
 from app.infrastructure.database.models.crew_model import (
     FlightCrew,
-    AirfleetFlightCrew,
     FlightCrewPosition,
     FlightCrewLicenseType,
 )
-from app.infrastructure.database.models.flight_operation_model import FlightOperation
-from app.infrastructure.database.models.flight_model import Flight
+from app.infrastructure.database.models.airfleet_model import AirfleetFlightCrew
+from app.infrastructure.database.models.flight_operation_model import (
+    FlightOperation, ScheduledFlight
+)
+from app.infrastructure.database.models.flight_model import Flight, Route
 from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
-from app.infrastructure.database.models.flight_model import Route
-from app.infrastructure.database.models.airport_model import Airport
-from app.infrastructure.database.models.flight_model import City
+from app.infrastructure.database.models.airport_model import Airport, City
 from app.infrastructure.database.repositories import flight_crew_repository
 
 logger = logging.getLogger(__name__)

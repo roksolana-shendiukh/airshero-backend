@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .airline_model import AirlineAirfleet
-    from .crew_model import FlightCrew, AirfleetFlightCrew
+    from .crew_model import FlightCrew
+    from .airfleet_model import AirfleetFlightCrew 
     from .flight_model import Flight
     from .flight_operation_model import FlightOperation
     from .seat_model import SeatLayout
 
-from sqlalchemy import Boolean, Computed, DECIMAL, ForeignKeyConstraint, Identity, Integer, PrimaryKeyConstraint, String, Unicode, text
+from sqlalchemy import Computed, DECIMAL, ForeignKeyConstraint, Identity, Integer, PrimaryKeyConstraint, String, Unicode, text
 from sqlalchemy.dialects.mssql import DATETIME2
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

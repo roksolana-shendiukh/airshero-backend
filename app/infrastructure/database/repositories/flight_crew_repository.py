@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from app.infrastructure.database.models.crew_model import (
-    FlightCrew, AirfleetFlightCrew, FlightCrewFlightOperation, 
+    FlightCrew, FlightCrewFlightOperation,
     FlightCrewPosition, FlightCrewLicenseType
 )
+from app.infrastructure.database.models.airfleet_model import AirfleetFlightCrew
 from app.infrastructure.database.models.airline_model import AirlineAirfleet
 from app.infrastructure.database.models.flight_operation_model import (
     FlightOperation, FlightOperationStatus, ScheduledFlight

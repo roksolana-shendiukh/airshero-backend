@@ -36,11 +36,6 @@ def search_cities(db: Session, query: str) -> list:
 
 
 def _base_scheduled_query(db: Session):
-    """
-    Базовий join-ланцюжок який використовується в кількох функціях:
-    ScheduledFlight → Flight → Route → DepAirport / ArrAirport
-                   → FlightStatus
-    """
     DepAirport = aliased(Airport, name="dep")
     ArrAirport = aliased(Airport, name="arr")
 

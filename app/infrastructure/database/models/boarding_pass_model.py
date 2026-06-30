@@ -1,3 +1,4 @@
+from __future__ import annotations
 import datetime
 from typing import Optional
 
@@ -7,7 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
 
-from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
