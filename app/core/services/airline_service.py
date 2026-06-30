@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from app.infrastructure.database.repositories import airline_repository, storage_repository
 
 
-def _get_logo_url(airline_url: str | None) -> str | None:
+def get_logo_url(airline_url: str | None) -> str | None:
     if not airline_url:
         return None
     prefix = f"airlines/{airline_url}/"
@@ -19,7 +19,7 @@ def get_all_airlines(db: Session, skip: int = 0, limit: int = 50) -> list[dict]:
             "airline_id":   a.airline_id,
             "airline_name": a.airline_name,
             "iata_code":    a.iata_code,
-            "logo":         _get_logo_url(a.airline_url),
+            "logo":         get_logo_url(a.airline_url),
         }
         for a in airlines
     ]
@@ -36,5 +36,5 @@ def get_airline_by_id(db: Session, airline_id: int) -> dict:
         "airline_name": airline.airline_name,
         "iata_code":    airline.iata_code,
         "airline_url":  airline.airline_url,
-        "logo":         _get_logo_url(airline.airline_url),
+        "logo":         get_logo_url(airline.airline_url),
     }
