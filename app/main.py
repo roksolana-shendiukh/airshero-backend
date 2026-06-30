@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from apscheduler.schedulers.background import BackgroundScheduler
-from app.interfaces.api.v1.routes import admin_router, airfleet_crud_controller, airfleet_router, airline_router, airport_router, analytics_router, auth_controller, baggage_router, booking_router, checkin_router, city_router, crew_router, flight_crew_router, flight_operation_router, flight_router, gate_router, object_crud_router, passenger_router, planning_router, reference_crud_router, reference_router, route_router
+from app.interfaces.api.v1.routes import admin_router, airfleet_router, airline_router, airport_router, analytics_router, auth_controller, baggage_router, booking_router, checkin_router, city_router, crew_router, flight_crew_router, flight_operation_router, flight_router, gate_router, object_crud_router, passenger_router, planning_router, reference_crud_router, reference_router, route_router
 from app.core.services.system_service import record_snapshot
 from contextlib import asynccontextmanager
 
@@ -55,7 +55,6 @@ app.include_router(user_router.router)
 app.include_router(crew_router.router)
 app.include_router(object_crud_router.router)
 app.include_router(reference_router.router)
-app.include_router(airfleet_crud_controller.router)
 
 
 @app.on_event("startup")
