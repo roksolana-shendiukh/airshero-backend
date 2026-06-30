@@ -1,12 +1,9 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
-from app.infrastructure.database.models.airfleet_model import Gate
-from app.infrastructure.database.models.airfleet_model import Terminal, TerminalType
+from app.infrastructure.database.models.airport_model import Gate, Terminal, TerminalType
 from app.infrastructure.database.models.flight_operation_model import (
     FlightOperation, ScheduledFlight
 )
-from app.infrastructure.database.models.flight_model import Flight
-
 
 def _get_busy_gate_ids(
     db: Session,

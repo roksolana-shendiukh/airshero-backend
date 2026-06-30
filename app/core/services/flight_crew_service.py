@@ -12,7 +12,8 @@ from app.infrastructure.database.models.flight_operation_model import (
     FlightOperation, ScheduledFlight
 )
 from app.infrastructure.database.models.flight_model import Flight, Route
-from app.infrastructure.database.models.airport_model import Airport
+from app.infrastructure.database.models.flight_schedule_model import FlightSchedule
+from app.infrastructure.database.models.airport_model import Airport, City
 from app.infrastructure.database.repositories import flight_crew_repository
 
 logger = logging.getLogger(__name__)
